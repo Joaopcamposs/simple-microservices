@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Envelope",
+  "description": "Mensagem neutra trocada entre gateway, relay, router e workers.",
+  "type": "object",
+  "required": ["job_id", "type", "payload", "created_at", "origin"],
+  "additionalProperties": false,
+  "properties": {
+    "job_id": { "type": "string", "format": "uuid" },
+    "type": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "origin": { "type": "string", "enum": ["gateway-py", "gateway-go"] }
+  }
+}
