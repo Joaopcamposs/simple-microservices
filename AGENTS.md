@@ -4,7 +4,7 @@ Visão geral e arquitetura em `README.md`. Projeto de demonstração, minimalist
 
 ## Documentação
 
-O `README.md` faz parte da entrega. Serviço criado/removido, endpoint novo, contrato (`contracts/envelope.schema.json`), schema (`db/init.sql`) ou tabela de roteamento alterados atualizam o README no mesmo passo. Doc desatualizada é bug. Não há CHANGELOG.
+O `README.md` faz parte da entrega. Serviço criado/removido, endpoint novo, contrato (`contracts/envelope.schema.json`), schema (`db/init.sql`) ou tabela de roteamento alterados atualizam o README no mesmo passo. Doc desatualizada é bug. Mudança notável entra no `CHANGELOG.md` no mesmo passo.
 
 ## Regras de código
 

@@ -1,0 +1,17 @@
+[project]
+name = "gateway-py"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "psycopg[binary,pool]",
+    "pydantic",
+    "uuid-utils>=1.0.0",
+]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

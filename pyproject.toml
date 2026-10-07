@@ -1,0 +1,18 @@
+[project]
+name = "simple-microservices"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = []
+
+# Lint compartilhado por todos os serviços Python (`make ruff`).
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+# D1: exige docstring de módulo, classe e função (regra do AGENTS.md).
+select = ["E", "F", "I", "UP", "D1"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["D1"]
+"**/__init__.py" = ["D104"]

@@ -1,0 +1,67 @@
+"""gateway-py: API FastAPI que grava job + outbox e responde 202."""
+
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from uuid import UUID
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from psycopg_pool import AsyncConnectionPool
+
+from app.models import CreateJobRequest, CreateJobResponse, JobView
+from app.repository import JobRepository
+
+ORIGIN = "gateway-py"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Abre o pool no boot e o fecha no shutdown; o repositório fica em app.state."""
+    dsn = os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app")
+    async with AsyncConnectionPool(dsn, open=False) as pool:
+        await pool.open()
+        app.state.repository = JobRepository(pool)
+        yield
+
+
+def get_repository(request: Request) -> JobRepository:
+    """Dependência: entrega o repositório criado no lifespan (substituível em testes)."""
+    return request.app.state.repository
+
+
+def create_app() -> FastAPI:
+    """Monta a aplicação e registra as rotas."""
+    app = FastAPI(title="Gateway Py", lifespan=lifespan)
+
+    @app.post(
+        "/jobs",
+        status_code=202,
+        response_model=CreateJobResponse,
+        tags=["jobs"],
+        summary="Cria um job",
+        description="Grava job e outbox numa transação e responde 202. Processamento assíncrono.",
+    )
+    async def create_job(
+        request: CreateJobRequest, repository: JobRepository = Depends(get_repository)
+    ) -> CreateJobResponse:
+        """Aceita o job; o relay/router/worker cuidam do resto."""
+        return CreateJobResponse(job_id=await repository.create(request, ORIGIN))
+
+    @app.get(
+        "/jobs/{job_id}",
+        response_model=JobView,
+        tags=["jobs"],
+        summary="Consulta um job",
+        description="Devolve o status e os resultados gravados pelos workers.",
+    )
+    async def get_job(job_id: UUID, repository: JobRepository = Depends(get_repository)) -> JobView:
+        """Consulta o job; 404 se não existir."""
+        view = await repository.get(job_id)
+        if view is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return view
+
+    return app
+
+
+app = create_app()

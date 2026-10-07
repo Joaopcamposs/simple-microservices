@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
       POSTGRES_DB: app
-    ports: ["5432:5432"]
+    ports: ["55432:5432"]
     volumes:
       # init.sql roda só no primeiro boot (volume vazio).
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -18,7 +18,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:4-management-alpine
-    ports: ["5672:5672", "15672:15672"]
+    ports: ["55672:5672", "55673:15672"]
     volumes:
       - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
       - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-definitions.conf:ro
@@ -26,3 +26,12 @@ services:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       retries: 20
+
+  gateway-py:
+    build: ./services/gateway-py
+    restart: unless-stopped
+    ports: ["58001:8000"]
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+    depends_on:
+      postgres: { condition: service_healthy }

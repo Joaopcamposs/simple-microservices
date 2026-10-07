@@ -6,7 +6,7 @@
 
 **Architecture:** Gateway grava `jobs` + `outbox` numa transação (Postgres). `relay` (Go) faz poll da outbox e dá `POST /dispatch` no `router` (Go). O `router` mapeia `type → worker` e publica no exchange direct `jobs` do RabbitMQ; cada worker consome sua fila e grava `job_results` (idempotente).
 
-**Tech Stack:** Go 1.24 (Gin, pgx/v5, amqp091-go, swaggo), Python 3.13 (FastAPI, psycopg3, aio-pika, Celery, TaskIQ, uv, ruff, pytest-asyncio), Postgres 17, RabbitMQ 4, Docker Compose.
+**Tech Stack:** Go 1.27 (Gin, pgx/v5, amqp091-go, swaggo), Python 3.13 (FastAPI, psycopg3, aio-pika, Celery, TaskIQ, uv, ruff, pytest-asyncio), Postgres 17, RabbitMQ 4, Docker Compose.
 
 **Spec:** `docs/superpowers/specs/2026-10-07-simple-microservices-design.md`
 
@@ -23,7 +23,7 @@
 - Tabela de roteamento fixa: `report.generate→celery`, `email.send→taskiq`, `http.fetch→asyncio`, `image.resize→go`.
 - Testes: `pytest -x --tb=short -q <arquivo>` (Python) e `go test ./...` dentro do serviço (Go). Só os testes da task. Máx. 2 tentativas no mesmo teste; se persistir, pare e explique.
 - Testes de integração exigem `TEST_DATABASE_URL` (e fazem `TRUNCATE` das tabelas: **só usar no Postgres de dev do compose**); sem a variável, são pulados. Antes deles: `docker ps`.
-- URL de dev do Postgres: `postgres://app:app@localhost:5432/app`. AMQP: `amqp://guest:guest@localhost:5672/`.
+- URL de dev do Postgres: `postgres://app:app@localhost:55432/app`. AMQP: `amqp://guest:guest@localhost:55672/`.
 
 ## Review Focus
 
@@ -215,7 +215,7 @@ services:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
       POSTGRES_DB: app
-    ports: ["5432:5432"]
+    ports: ["55432:5432"]
     volumes:
       # init.sql roda só no primeiro boot (volume vazio).
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -226,7 +226,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:4-management-alpine
-    ports: ["5672:5672", "15672:15672"]
+    ports: ["55672:5672", "55673:15672"]
     volumes:
       - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
       - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-definitions.conf:ro
@@ -286,7 +286,7 @@ __pycache__/
 
 Run: `docker compose up -d postgres rabbitmq && sleep 15 && docker compose ps`
 Expected: ambos `healthy`.
-Run: `curl -s -u guest:guest localhost:15672/api/queues | python3 -c "import sys,json; print(sorted(q['name'] for q in json.load(sys.stdin)))"`
+Run: `curl -s -u guest:guest localhost:55673/api/queues | python3 -c "import sys,json; print(sorted(q['name'] for q in json.load(sys.stdin)))"`
 Expected: `['jobs.asyncio', 'jobs.celery', 'jobs.go', 'jobs.taskiq']`
 Run: `docker compose exec postgres psql -U app -c '\dt'`
 Expected: `jobs`, `outbox`, `job_results`.
@@ -598,7 +598,7 @@ func env(key, fallback string) string {
 
 // run monta as dependências e sobe o servidor HTTP.
 func run() error {
-	pub, err := NewAMQPPublisher(env("AMQP_URL", "amqp://guest:guest@localhost:5672/"))
+	pub, err := NewAMQPPublisher(env("AMQP_URL", "amqp://guest:guest@localhost:55672/"))
 	if err != nil {
 		return err
 	}
@@ -630,7 +630,7 @@ Expected: PASS.
 
 ```dockerfile
 # Build multi-stage: binário estático em imagem mínima.
-FROM golang:1.24-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -657,7 +657,7 @@ ENTRYPOINT ["/app"]
 - [ ] **Step 11: Verificar de ponta a ponta o router**
 
 Run: `docker compose up -d --build router` e, de dentro da rede: `docker compose exec router wget -qO- --post-data='{"job_id":"j1","type":"email.send","payload":{}}' --header='Content-Type: application/json' http://localhost:8080/dispatch; echo $?`
-Expected: exit `0`; `curl -s -u guest:guest localhost:15672/api/queues/%2F/jobs.taskiq | grep -o '"messages":[0-9]*'` → `"messages":1`. Depois esvazie: `docker compose exec rabbitmq rabbitmqctl purge_queue jobs.taskiq`.
+Expected: exit `0`; `curl -s -u guest:guest localhost:55673/api/queues/%2F/jobs.taskiq | grep -o '"messages":[0-9]*'` → `"messages":1`. Depois esvazie: `docker compose exec rabbitmq rabbitmqctl purge_queue jobs.taskiq`.
 
 - [ ] **Step 12: Checkpoint** — pare; humano revisa/commita.
 
@@ -1040,7 +1040,7 @@ func env(key, fallback string) string {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	pool, err := pgxpool.New(ctx, env("DATABASE_URL", "postgres://app:app@localhost:5432/app"))
+	pool, err := pgxpool.New(ctx, env("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
 	if err != nil {
 		return err
 	}
@@ -1064,7 +1064,7 @@ func main() {
 
 - [ ] **Step 8: Rodar testes** (`docker ps` antes; Postgres do compose no ar)
 
-Run: `cd services/relay && go get github.com/jackc/pgx/v5 && go mod tidy && go vet ./... && test -z "$(gofmt -l .)" && TEST_DATABASE_URL=postgres://app:app@localhost:5432/app go test ./...`
+Run: `cd services/relay && go get github.com/jackc/pgx/v5 && go mod tidy && go vet ./... && test -z "$(gofmt -l .)" && TEST_DATABASE_URL=postgres://app:app@localhost:55432/app go test ./...`
 Expected: PASS (5 testes; nenhum SKIP).
 
 - [ ] **Step 9: `Dockerfile`** — idêntico ao da Task 3 (copiar o mesmo conteúdo).
@@ -1476,7 +1476,7 @@ func env(key, fallback string) string {
 
 // run monta as dependências e sobe o servidor.
 func run() error {
-	pool, err := pgxpool.New(context.Background(), env("DATABASE_URL", "postgres://app:app@localhost:5432/app"))
+	pool, err := pgxpool.New(context.Background(), env("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
 	if err != nil {
 		return err
 	}
@@ -1503,7 +1503,7 @@ cd services/gateway-go
 go get github.com/gin-gonic/gin github.com/jackc/pgx/v5 github.com/google/uuid github.com/swaggo/gin-swagger github.com/swaggo/files
 cd ../.. && make swagger   # cria services/gateway-go/docs
 cd services/gateway-go && go mod tidy && go vet ./... && test -z "$(gofmt -l .)"
-TEST_DATABASE_URL=postgres://app:app@localhost:5432/app go test ./...
+TEST_DATABASE_URL=postgres://app:app@localhost:55432/app go test ./...
 ```
 Expected: PASS (3 testes; nenhum SKIP).
 
@@ -1515,14 +1515,14 @@ Expected: PASS (3 testes; nenhum SKIP).
   gateway-go:
     build: ./services/gateway-go
     restart: unless-stopped
-    ports: ["8002:8000"]
+    ports: ["58002:8000"]
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app
     depends_on:
       postgres: { condition: service_healthy }
 ```
 
-- [ ] **Step 11: Verificar** — `docker compose up -d --build gateway-go`; abrir `http://localhost:8002/docs/index.html`; `POST /jobs {"type":"image.resize"}` → 202; com o `relay` e `router` no ar, `GET /jobs/{id}` mostra `DISPATCHED` e há 1 mensagem em `jobs.go`.
+- [ ] **Step 11: Verificar** — `docker compose up -d --build gateway-go`; abrir `http://localhost:58002/docs/index.html`; `POST /jobs {"type":"image.resize"}` → 202; com o `relay` e `router` no ar, `GET /jobs/{id}` mostra `DISPATCHED` e há 1 mensagem em `jobs.go`.
 
 - [ ] **Step 12: Checkpoint** — pare; humano revisa/commita.
 
@@ -1838,12 +1838,12 @@ func env(key, fallback string) string {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	pool, err := pgxpool.New(ctx, env("DATABASE_URL", "postgres://app:app@localhost:5432/app"))
+	pool, err := pgxpool.New(ctx, env("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	conn, err := amqp.Dial(env("AMQP_URL", "amqp://guest:guest@localhost:5672/"))
+	conn, err := amqp.Dial(env("AMQP_URL", "amqp://guest:guest@localhost:55672/"))
 	if err != nil {
 		return err
 	}
@@ -1869,7 +1869,7 @@ func main() {
 
 - [ ] **Step 8: Testes e lint**
 
-Run: `cd services/worker-go && go get github.com/jackc/pgx/v5 github.com/rabbitmq/amqp091-go && go mod tidy && go vet ./... && test -z "$(gofmt -l .)" && TEST_DATABASE_URL=postgres://app:app@localhost:5432/app go test ./...`
+Run: `cd services/worker-go && go get github.com/jackc/pgx/v5 github.com/rabbitmq/amqp091-go && go mod tidy && go vet ./... && test -z "$(gofmt -l .)" && TEST_DATABASE_URL=postgres://app:app@localhost:55432/app go test ./...`
 Expected: PASS (3 testes).
 
 - [ ] **Step 9: `Dockerfile`** — igual ao da Task 3.
@@ -1888,7 +1888,7 @@ Expected: PASS (3 testes).
       rabbitmq: { condition: service_healthy }
 ```
 
-- [ ] **Step 11: Verificar** — `docker compose up -d --build` (stack Go completa); `POST http://localhost:8002/jobs {"type":"image.resize"}`; em ~3s `GET /jobs/{id}` → `status: DONE` e `results: [{"worker":"go",...}]`.
+- [ ] **Step 11: Verificar** — `docker compose up -d --build` (stack Go completa); `POST http://localhost:58002/jobs {"type":"image.resize"}`; em ~3s `GET /jobs/{id}` → `status: DONE` e `results: [{"worker":"go",...}]`.
 
 - [ ] **Step 12: Checkpoint** — pare; humano revisa/commita. (Fim do bloco Go.)
 
@@ -2164,7 +2164,7 @@ ORIGIN = "gateway-py"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Abre o pool no boot e o fecha no shutdown; o repositório fica em app.state."""
-    dsn = os.environ.get("DATABASE_URL", "postgres://app:app@localhost:5432/app")
+    dsn = os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app")
     async with AsyncConnectionPool(dsn, open=False) as pool:
         await pool.open()
         app.state.repository = JobRepository(pool)
@@ -2219,7 +2219,7 @@ app = create_app()
 - [ ] **Step 9: Testes e lint**
 
 Run: `cd services/gateway-py && uv run pytest -x --tb=short -q tests/test_gateway.py` → PASS.
-Run (Postgres no ar): `TEST_DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest -x --tb=short -q tests/test_repository.py` → PASS.
+Run (Postgres no ar): `TEST_DATABASE_URL=postgres://app:app@localhost:55432/app uv run pytest -x --tb=short -q tests/test_repository.py` → PASS.
 Run: `cd ../.. && make ruff` → limpo (ajuste `uvx ruff format services` se pedir).
 
 - [ ] **Step 10: `Dockerfile`**
@@ -2241,14 +2241,14 @@ CMD ["uv", "run", "--no-dev", "uvicorn", "app.main:app", "--host", "0.0.0.0", "-
   gateway-py:
     build: ./services/gateway-py
     restart: unless-stopped
-    ports: ["8001:8000"]
+    ports: ["58001:8000"]
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app
     depends_on:
       postgres: { condition: service_healthy }
 ```
 
-- [ ] **Step 12: Verificar** — `docker compose up -d --build gateway-py`; `http://localhost:8001/docs`; `POST /jobs {"type":"image.resize"}` → 202; com o bloco Go no ar, em ~3s `GET /jobs/{id}` → `DONE` com resultado `go`.
+- [ ] **Step 12: Verificar** — `docker compose up -d --build gateway-py`; `http://localhost:58001/docs`; `POST /jobs {"type":"image.resize"}` → 202; com o bloco Go no ar, em ~3s `GET /jobs/{id}` → `DONE` com resultado `go`.
 
 - [ ] **Step 13: Checkpoint** — pare; humano revisa/commita.
 
@@ -2465,11 +2465,11 @@ async def main() -> None:
     """Conecta (com reconexão automática) e consome até o processo terminar."""
     logging.basicConfig(level=logging.INFO)
     connection = await aio_pika.connect_robust(
-        os.environ.get("AMQP_URL", "amqp://guest:guest@localhost:5672/")
+        os.environ.get("AMQP_URL", "amqp://guest:guest@localhost:55672/")
     )
     async with connection:
         channel = await connection.channel()
-        store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:5432/app"))
+        store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
         await JobConsumer(channel, store).run()
 
 
@@ -2479,7 +2479,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 7: Testes e lint**
 
-Run: `TEST_DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest -x --tb=short -q tests/test_store.py` → PASS. `make ruff` (na raiz) → limpo.
+Run: `TEST_DATABASE_URL=postgres://app:app@localhost:55432/app uv run pytest -x --tb=short -q tests/test_store.py` → PASS. `make ruff` (na raiz) → limpo.
 
 - [ ] **Step 8: `Dockerfile`** — igual ao da Task 7, com `CMD ["uv", "run", "--no-dev", "python", "-m", "app.main"]`.
 
@@ -2497,7 +2497,7 @@ Run: `TEST_DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest -x -
       rabbitmq: { condition: service_healthy }
 ```
 
-- [ ] **Step 10: Verificar** — `docker compose up -d --build worker-asyncio`; `POST http://localhost:8001/jobs {"type":"http.fetch"}` → em ~3s `DONE` com `results[0].worker == "asyncio"`.
+- [ ] **Step 10: Verificar** — `docker compose up -d --build worker-asyncio`; `POST http://localhost:58001/jobs {"type":"http.fetch"}` → em ~3s `DONE` com `results[0].worker == "asyncio"`.
 
 - [ ] **Step 11: Checkpoint** — pare; humano revisa/commita.
 
@@ -2613,7 +2613,7 @@ from celery import Celery
 from app.models import Envelope, Result
 from app.store import ResultStore
 
-app = Celery("worker_celery", broker=os.environ.get("CELERY_BROKER_URL", "amqp://guest:guest@localhost:5672//"))
+app = Celery("worker_celery", broker=os.environ.get("CELERY_BROKER_URL", "amqp://guest:guest@localhost:55672//"))
 # acks_late: o broker só recebe o ack depois que a task termina (grava o resultado).
 app.conf.task_acks_late = True
 app.conf.worker_prefetch_multiplier = 1
@@ -2624,7 +2624,7 @@ def process_job(envelope: dict[str, object]) -> None:
     """Processa o job (simulado com uma espera curta) e grava o resultado."""
     parsed = Envelope.model_validate(envelope)
     time.sleep(0.2)
-    store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:5432/app"))
+    store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
     store.save(parsed.job_id, "celery", Result(worker="celery", detail="report generated"))
 ```
 
@@ -2670,7 +2670,7 @@ async def main() -> None:
     """Conecta ao RabbitMQ e consome jobs.celery."""
     logging.basicConfig(level=logging.INFO)
     connection = await aio_pika.connect_robust(
-        os.environ.get("AMQP_URL", "amqp://guest:guest@localhost:5672/")
+        os.environ.get("AMQP_URL", "amqp://guest:guest@localhost:55672/")
     )
     async with connection:
         channel = await connection.channel()
@@ -2686,7 +2686,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 7: Testes e lint**
 
-Run: `TEST_DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest -x --tb=short -q tests/test_store.py` → PASS. `make ruff` → limpo.
+Run: `TEST_DATABASE_URL=postgres://app:app@localhost:55432/app uv run pytest -x --tb=short -q tests/test_store.py` → PASS. `make ruff` → limpo.
 
 - [ ] **Step 8: `Dockerfile`** — igual ao da Task 7 sem `CMD` fixo (`CMD` é definido por serviço no compose).
 
@@ -2715,7 +2715,7 @@ Run: `TEST_DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest -x -
       rabbitmq: { condition: service_healthy }
 ```
 
-- [ ] **Step 10: Verificar** — `docker compose up -d --build worker-celery worker-celery-bridge`; `POST http://localhost:8001/jobs {"type":"report.generate"}` → em ~3s `DONE` com `worker == "celery"`.
+- [ ] **Step 10: Verificar** — `docker compose up -d --build worker-celery worker-celery-bridge`; `POST http://localhost:58001/jobs {"type":"report.generate"}` → em ~3s `DONE` com `worker == "celery"`.
 
 - [ ] **Step 11: Checkpoint** — pare; humano revisa/commita.
 
@@ -2769,7 +2769,7 @@ from app.models import Envelope, Result
 from app.store import ResultStore
 
 broker = AioPikaBroker(
-    os.environ.get("TASKIQ_BROKER_URL", "amqp://guest:guest@localhost:5672/"),
+    os.environ.get("TASKIQ_BROKER_URL", "amqp://guest:guest@localhost:55672/"),
     queue_name="taskiq",
 )
 
@@ -2779,7 +2779,7 @@ async def process_job(envelope: dict[str, object]) -> None:
     """Processa o job (simulado com uma espera curta) e grava o resultado."""
     parsed = Envelope.model_validate(envelope)
     await asyncio.sleep(0.2)
-    store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:5432/app"))
+    store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
     await store.save(parsed.job_id, "taskiq", Result(worker="taskiq", detail="email sent"))
 ```
 
@@ -2827,7 +2827,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     await broker.startup()
     connection = await aio_pika.connect_robust(
-        os.environ.get("AMQP_URL", "amqp://guest:guest@localhost:5672/")
+        os.environ.get("AMQP_URL", "amqp://guest:guest@localhost:55672/")
     )
     async with connection:
         channel = await connection.channel()
@@ -2843,7 +2843,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 6: Testes e lint**
 
-Run: `TEST_DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest -x --tb=short -q tests/test_store.py` → PASS. `make ruff` → limpo.
+Run: `TEST_DATABASE_URL=postgres://app:app@localhost:55432/app uv run pytest -x --tb=short -q tests/test_store.py` → PASS. `make ruff` → limpo.
 
 - [ ] **Step 7: `Dockerfile`** — igual ao da Task 9.
 
@@ -2872,7 +2872,7 @@ Run: `TEST_DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest -x -
       rabbitmq: { condition: service_healthy }
 ```
 
-- [ ] **Step 9: Verificar** — `docker compose up -d --build worker-taskiq worker-taskiq-bridge`; `POST http://localhost:8001/jobs {"type":"email.send"}` → em ~3s `DONE` com `worker == "taskiq"`. (Fim do bloco Python.)
+- [ ] **Step 9: Verificar** — `docker compose up -d --build worker-taskiq worker-taskiq-bridge`; `POST http://localhost:58001/jobs {"type":"email.send"}` → em ~3s `DONE` com `worker == "taskiq"`. (Fim do bloco Python.)
 
 - [ ] **Step 10: Checkpoint** — pare; humano revisa/commita.
 
@@ -2896,7 +2896,7 @@ Expected: 8 respostas `{"job_id": "..."}` com HTTP 202.
 - [ ] **Step 3: Estado final** — `sleep 5; docker compose exec postgres psql -U app -c "SELECT j.type, j.origin, j.status, r.worker FROM jobs j LEFT JOIN job_results r ON r.job_id = j.id ORDER BY j.created_at;"`
 Expected: 8 linhas `DONE`; workers `celery/taskiq/asyncio/go` conforme a tabela.
 
-- [ ] **Step 4: type desconhecido** — `curl -s -X POST localhost:8001/jobs -H 'content-type: application/json' -d '{"type":"nope"}'`, depois `GET /jobs/{id}` → `status: FAILED`.
+- [ ] **Step 4: type desconhecido** — `curl -s -X POST localhost:58001/jobs -H 'content-type: application/json' -d '{"type":"nope"}'`, depois `GET /jobs/{id}` → `status: FAILED`.
 
 - [ ] **Step 5: Router fora do ar não derruba o gateway** — `docker compose stop router`; `POST /jobs` nos dois gateways → 202; `docker compose start router`; em ~3s os jobs viram `DONE`.
 

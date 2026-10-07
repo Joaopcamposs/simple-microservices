@@ -63,8 +63,8 @@ Os dois frameworks têm formato de mensagem próprio e o envelope neutro não é
 
 | Pasta | Stack | Porta | Papel |
 |---|---|---|---|
-| `services/gateway-py` | FastAPI | 8001 | `POST /jobs`, `GET /jobs/{id}`; grava job + outbox |
-| `services/gateway-go` | Gin | 8002 | idem, comportamento idêntico |
+| `services/gateway-py` | FastAPI | 58001 | `POST /jobs`, `GET /jobs/{id}`; grava job + outbox |
+| `services/gateway-go` | Gin | 58002 | idem, comportamento idêntico |
 | `services/relay` | Go | — | poll da outbox; `POST` ao router; marca `sent` só após 2xx |
 | `services/router` | Go | interna 8080 | `POST /dispatch`; escolhe worker por `type`; publica no RabbitMQ |
 | `services/worker-celery` | Python | — | bridge aio-pika + task Celery |
@@ -72,7 +72,7 @@ Os dois frameworks têm formato de mensagem próprio e o envelope neutro não é
 | `services/worker-asyncio` | Python | — | aio-pika puro |
 | `services/worker-go` | Go | — | consumer + uma goroutine por mensagem (limitada pelo prefetch) |
 
-Swagger: gateway-py em `http://localhost:8001/docs`; gateway-go em `http://localhost:8002/docs/index.html`. RabbitMQ management: `http://localhost:15672` (guest/guest).
+Swagger: gateway-py em `http://localhost:58001/docs`; gateway-go em `http://localhost:58002/docs/index.html`. RabbitMQ management: `http://localhost:55673` (guest/guest).
 
 ### API dos gateways
 
@@ -124,7 +124,7 @@ Relay: em sucesso (2xx) marca outbox `sent` e job `DISPATCHED` (só se ainda `PE
 
 ## 6. RabbitMQ (`infra/rabbitmq/definitions.json`)
 
-Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.asyncio`, `jobs.go`, com routing key igual ao nome do worker. Carregado no boot do broker; nenhum serviço declara topologia. Celery e TaskIQ criam as filas internas dos próprios frameworks (`celery` e `taskiq`).
+Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.asyncio`, `jobs.go`, com routing key igual ao nome do worker. Carregado no boot do broker; nenhum serviço declara topologia. O mesmo arquivo cria o usuário `guest`/`guest` (as definitions substituem o usuário padrão) e `rabbitmq.conf` libera `guest` fora do loopback; só para demo. Celery e TaskIQ criam as filas internas dos próprios frameworks (`celery` e `taskiq`).
 
 ## 7. Garantias e limites
 
@@ -147,9 +147,9 @@ make down      # derruba e apaga volumes
 Exemplo:
 
 ```bash
-curl -s -X POST localhost:8001/jobs -H 'content-type: application/json' \
+curl -s -X POST localhost:58001/jobs -H 'content-type: application/json' \
   -d '{"type":"email.send","payload":{"to":"a@b.c"}}'
-curl -s localhost:8001/jobs/<job_id>      # status DONE e results[] em poucos segundos
+curl -s localhost:58001/jobs/<job_id>      # status DONE e results[] em poucos segundos
 ```
 
 Qualidade e testes:
@@ -160,7 +160,7 @@ make vet       # go vet + gofmt dos serviços Go
 make swagger   # regenera o OpenAPI do gateway-go
 ```
 
-Testes rodam por serviço (`go test ./...` ou `uv run pytest -x --tb=short -q <arquivo>`). Os de integração exigem `TEST_DATABASE_URL=postgres://app:app@localhost:5432/app` e **fazem `TRUNCATE` das tabelas**: use só o Postgres de dev do compose. Sem a variável, são pulados.
+Testes rodam por serviço (`go test ./...` ou `uv run pytest -x --tb=short -q <arquivo>`). Os de integração exigem `TEST_DATABASE_URL=postgres://app:app@localhost:55432/app` e **fazem `TRUNCATE` das tabelas**: use só o Postgres de dev do compose. Sem a variável, são pulados.
 
 ---
 
@@ -177,6 +177,7 @@ simple-microservices/
 ├── docs/superpowers/{specs,plans}/
 ├── docker-compose.yml
 ├── Makefile
+├── CHANGELOG.md
 ├── AGENTS.md
 └── README.md
 ```
