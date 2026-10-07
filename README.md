@@ -81,7 +81,7 @@ Swagger: gateway-py em `http://localhost:58001/docs`; gateway-go em `http://loca
 | `POST /jobs` | `{"type": "email.send", "payload": {}}` (`payload` opcional) | `202 {"job_id": "<uuid>"}`; `422` se `type` vazio/ausente |
 | `GET /jobs/{id}` | — | `200 {id, type, status, origin, created_at, results[]}`; `404`; `422` se o id não é uuid |
 
-Erros usam `{"detail": "..."}`. O `origin` do envelope é `gateway-py` ou `gateway-go`.
+Erros usam sempre `{"detail": "<texto curto>"}`: `type is required`, `invalid request body`, `invalid job id`, `job not found`. O `origin` do envelope é `gateway-py` ou `gateway-go`.
 
 ---
 

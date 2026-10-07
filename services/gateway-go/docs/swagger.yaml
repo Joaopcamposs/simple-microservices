@@ -1,0 +1,111 @@
+basePath: /
+definitions:
+  main.CreateJobRequest:
+    properties:
+      payload:
+        additionalProperties: {}
+        type: object
+      type:
+        example: email.send
+        type: string
+    required:
+    - type
+    type: object
+  main.CreateJobResponse:
+    properties:
+      job_id:
+        example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        type: string
+    type: object
+  main.ErrorResponse:
+    properties:
+      detail:
+        type: string
+    type: object
+  main.JobResult:
+    properties:
+      finished_at:
+        type: string
+      result:
+        type: object
+      worker:
+        type: string
+    type: object
+  main.JobView:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      origin:
+        type: string
+      results:
+        items:
+          $ref: '#/definitions/main.JobResult'
+        type: array
+      status:
+        type: string
+      type:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: Recebe jobs, grava job + outbox e responde 202.
+  title: Gateway Go
+  version: "1.0"
+paths:
+  /jobs:
+    post:
+      consumes:
+      - application/json
+      description: Grava o job e a outbox numa transação e responde 202. O processamento
+        é assíncrono.
+      parameters:
+      - description: Job
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.CreateJobRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/main.CreateJobResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Cria um job
+      tags:
+      - jobs
+  /jobs/{id}:
+    get:
+      description: Devolve o status e os resultados gravados pelos workers.
+      parameters:
+      - description: ID do job (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.JobView'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Consulta um job
+      tags:
+      - jobs
+swagger: "2.0"

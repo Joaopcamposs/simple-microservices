@@ -35,3 +35,12 @@ services:
       DATABASE_URL: postgres://app:app@postgres:5432/app
     depends_on:
       postgres: { condition: service_healthy }
+
+  gateway-go:
+    build: ./services/gateway-go
+    restart: unless-stopped
+    ports: ["58002:8000"]
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+    depends_on:
+      postgres: { condition: service_healthy }

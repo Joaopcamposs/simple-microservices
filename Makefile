@@ -1,5 +1,5 @@
 # Atalhos do projeto. Serviços Go e Python ficam em services/.
-GO_SERVICES := router relay gateway-go worker-go
+GO_SERVICES := gateway-go
 
 .PHONY: up down logs ruff vet swagger
 
