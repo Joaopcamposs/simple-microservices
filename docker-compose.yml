@@ -27,6 +27,15 @@ services:
       interval: 5s
       retries: 20
 
+  # Webhook que decide o worker pelo type e publica no RabbitMQ (só porta interna 8080).
+  router:
+    build: ./services/router
+    restart: unless-stopped
+    environment:
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
   gateway-py:
     build: ./services/gateway-py
     restart: unless-stopped

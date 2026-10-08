@@ -2,7 +2,7 @@
 
 Guia para quem já domina HTTP, SQL, Docker e o básico de mensageria e quer entender **por que** este projeto é montado assim e **como** as peças se integram. O `README.md` diz o que existe; este arquivo explica as decisões, os mecanismos e as armadilhas.
 
-> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py` e `gateway-go` existem e foram verificados. `relay`, `router` e os quatro workers estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
+> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go` e `router` existem e foram verificados. `relay` e os quatro workers estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
 
 ---
 
@@ -140,6 +140,48 @@ Para mostrar que o contrato (envelope + tabelas), e não a linguagem, é a front
 
 ## 6. Relay **[planejado]**
 
+### Relay e router: quem faz o quê
+
+Os dois ficam no meio do caminho, mas resolvem problemas diferentes:
+
+| | Relay | Router |
+|---|---|---|
+| Pergunta que responde | "esta linha da outbox já foi entregue?" | "para qual worker este `type` vai?" |
+| Lado do banco | lê/escreve Postgres (`outbox`, `jobs`) | não conhece o banco |
+| Lado do broker | não conhece o RabbitMQ | só ele publica no RabbitMQ |
+| Estado | tem (a outbox é a fonte de verdade da entrega) | nenhum; cada request é independente |
+| Garante | **não perder** job: só marca `sent` após 2xx, reenvia se falhar | **destino correto** e publicação **confirmada** pelo broker |
+| Traduz | linha da tabela → chamada HTTP | chamada HTTP → mensagem AMQP com routing key |
+
+Em resumo: o **relay é a ponte entre banco e mundo externo** (cuida de confiabilidade e retentativa); o **router é a ponte entre HTTP e broker** (cuida de roteamento). Sem o relay, nada tiraria o job da outbox. Sem o router, o relay teria que conhecer filas e workers, e cada novo worker mexeria nele. Separados, cada um muda por um único motivo: o relay muda se a forma de entregar mudar; o router, se a tabela de workers mudar.
+
+O status HTTP é o contrato entre eles: 2xx "pode marcar entregue", 4xx "a mensagem é inválida, não repita", 5xx "tente de novo depois".
+
+### Dava para ser um serviço só?
+
+Dava, e em muitos sistemas reais é um só (o "outbox relay" publica direto no broker, sem router). Os dois desenhos funcionam; é troca de custos.
+
+**Vantagens de separar (desenho atual):**
+
+- **Um motivo de mudança por serviço.** Nova fila ou worker mexe só no router. Mudança na forma de ler a outbox (polling, `LISTEN/NOTIFY`, lease) mexe só no relay.
+- **Relay sem dependência de broker.** Ele fala HTTP e Postgres. Trocar RabbitMQ por Kafka ou SQS altera só o router.
+- **Roteamento reutilizável.** Qualquer outro produtor (um cron, uma ferramenta de admin, outro serviço) pode fazer `POST /dispatch` sem passar pela outbox.
+- **Escala e falha independentes.** O router é stateless: dá para ter várias réplicas atrás de um balanceador. O relay tem estado (locks da outbox) e pede cuidado.
+- **Teste simples.** O router testa-se com um fake de `Publisher` e sem banco. O relay testa-se com um fake de HTTP e sem broker.
+- **Didático.** É a fronteira que o projeto quer mostrar: persistência confiável de um lado, roteamento do outro.
+
+**Vantagens de unificar:**
+
+- **Menos peças:** um container, um Dockerfile, um deploy, um conjunto de logs.
+- **Sem salto de rede:** menos latência e um modo de falha a menos (relay não precisa tratar "router fora do ar").
+- **Semântica mais forte e simples:** o relay marcaria `sent` direto após o publisher confirm do broker, sem traduzir status HTTP em decisão. Também some o contrato 2xx/4xx/5xx a manter.
+- **Menos código:** some o servidor HTTP, o cliente HTTP e a serialização intermediária.
+- **Operação mais barata** em times pequenos.
+
+**Custo de unificar:** a tabela de workers e a lógica de outbox passam a viver no mesmo binário, então o relay volta a conhecer filas e workers. Um worker novo obriga a redeploy de quem lê o banco, e o roteamento deixa de ser reaproveitável por outros produtores.
+
+**Quando eu unificaria:** um único produtor (a outbox), um único broker, time pequeno e sem previsão de trocar o broker. **Quando manteria separado:** vários produtores, roteamento que muda com frequência, ou necessidade de escalar a publicação sem multiplicar leitores da outbox. Neste projeto a separação é uma escolha didática, não uma necessidade técnica.
+
 Processo Go que drena a outbox. Um ciclo (`RunOnce`):
 
 1. Abre transação e seleciona linhas `pending` com `FOR UPDATE SKIP LOCKED`.
@@ -161,7 +203,7 @@ Mecanismos para estudar:
 
 ---
 
-## 7. Router **[planejado]**
+## 7. Router **[implementado]**
 
 Webhook Go (`POST /dispatch`) que traduz `type` em destino e publica no RabbitMQ.
 
@@ -177,6 +219,24 @@ Por que existe como serviço separado, em vez de o relay publicar direto:
 - A **decisão de roteamento vive em um lugar só** e é trocável sem tocar no relay.
 - O relay vira agnóstico de broker: fala HTTP. Dá para trocar RabbitMQ por outra coisa mexendo apenas no router.
 - A diferença 4xx vs 5xx traduz "a mensagem é inválida, não adianta repetir" contra "o sistema está indisponível, repita". O relay não precisa entender por quê.
+
+Arquivos de `services/router/` (cada um com uma responsabilidade):
+
+| Arquivo | Papel |
+|---|---|
+| `routes.go` | tabela `type → worker` (`DefaultRoutes`) e `Lookup`. É o **único** lugar que conhece workers |
+| `handler.go` | `DispatchHandler`: lê o corpo, extrai `type`, consulta a tabela, publica e traduz o resultado em status HTTP |
+| `publisher.go` | `AMQPPublisher`: conexão, canal com confirms e `Publish`. Implementa a interface `Publisher` |
+| `main.go` | monta publisher + handler e sobe `POST /dispatch` (estado de processo nasce aqui, sem global) |
+
+Fluxo de um request: corpo bruto → `json.Unmarshal` só de `job_id` e `type` → `Lookup` → `Publish(worker, corpo bruto)` → 202. O corpo é republicado **byte a byte**; o router não reserializa nada.
+
+Para ver na prática (a porta 8080 é interna ao compose):
+
+```bash
+docker exec simple-microservices-router-1 wget -qO- --post-data='{"job_id":"x","type":"email.send"}' http://localhost:8080/dispatch
+# 202 e 1 mensagem em jobs.taskiq (RabbitMQ management em localhost:55673); type "nope" devolve 422
+```
 
 Detalhes de implementação:
 
@@ -286,7 +346,47 @@ As regras do `AGENTS.md` não são estilo, são o que mantém as fronteiras:
 
 ---
 
-## 13. Glossário rápido de decisões
+## 13. Python ou Go: quando cada um faz sentido
+
+O projeto usa os dois de propósito, mas a divisão não é sorteio. Cada escolha tem um critério.
+
+| Componente | Linguagem | Por quê |
+|---|---|---|
+| gateways | Python **e** Go | é a comparação do estudo: mesma API, mesmo contrato, duas stacks. Dá para ver o que muda (validação, Swagger, pool de conexão) e o que não muda |
+| relay, router | Go | processos pequenos, sem regra de negócio, que ficam rodando o tempo todo e fazem I/O concorrente. Binário estático, imagem de poucos MB, sem runtime para manter |
+| worker-go | Go | mostra o modelo de concorrência nativo: uma goroutine por mensagem, limitada pelo prefetch |
+| worker-asyncio | Python | mostra concorrência cooperativa (`async/await`) num único processo |
+| worker-celery, worker-taskiq | Python | Celery e TaskIQ são frameworks Python. Existem para quem já tem código Python e quer filas sem escrever consumer |
+
+### Onde Go costuma ganhar
+
+- **Serviços de infraestrutura** (proxy, relay, router, consumers simples): binário único, baixo uso de memória, inicialização instantânea.
+- **Concorrência alta e barata:** goroutines usam pouca memória e o runtime as distribui por todos os núcleos. Não há GIL.
+- **Trabalho CPU-bound** dentro do mesmo processo (ex.: `image.resize`): em Python puro, threads não paralelizam CPU.
+- **Erros explícitos e tipagem estática** por padrão, o que ajuda em código que quase não muda e precisa ser previsível.
+- **Deploy simples:** `CGO_ENABLED=0` gera um arquivo só, copiado para uma imagem `alpine`.
+
+### Onde Python costuma ganhar
+
+- **Velocidade de desenvolvimento e ecossistema:** bibliotecas de dados, ML, PDF, integrações. Um worker `report.generate` real provavelmente usaria pandas ou similar, que não têm equivalente tão maduro em Go.
+- **Frameworks prontos de fila e API:** Celery (retries, agendamento, canvas), FastAPI (validação e OpenAPI quase de graça via Pydantic).
+- **Time que já domina Python:** o custo de manutenção pesa mais que o ganho de desempenho.
+- **Trabalho I/O-bound:** com `asyncio` o Python aguenta muitas conexões simultâneas; o gargalo costuma ser rede ou banco, não a linguagem.
+
+### Como decidir (regra prática)
+
+1. O componente é **encanamento** (move dados, sem lógica de domínio)? Go.
+2. O componente depende de **biblioteca que só existe em Python**, ou o time vive em Python? Python.
+3. É **CPU-bound** e precisa de paralelismo real? Go (ou Python com processos/extensões nativas, com mais complexidade).
+4. É I/O-bound e simples? Os dois servem; vence o que o time mantém melhor.
+
+### Aviso honesto sobre este projeto
+
+Aqui os handlers dos workers só dormem um instante e gravam resultado, e não há benchmark (está fora de escopo). **Nada neste repositório prova que um é mais rápido.** Os números de memória e throughput que se ouvem por aí dependem de carga real. O que o projeto mostra é a **forma** de cada stack: como cada uma estrutura concorrência, validação, ack e testes. Use-o para comparar o código, não para escolher por desempenho.
+
+---
+
+## 14. Glossário rápido de decisões
 
 | Escolha | Alternativa | Por que esta |
 |---|---|---|

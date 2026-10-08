@@ -1,0 +1,5 @@
+module router
+
+go 1.27
+
+require github.com/rabbitmq/amqp091-go v1.15.0
