@@ -88,3 +88,12 @@ func TestDispatchPublishFailureIs502(t *testing.T) {
 		t.Fatalf("status = %d, want 502", rec.Code)
 	}
 }
+
+// O healthcheck do compose depende de GET /healthz responder 200.
+func TestHealthOK(t *testing.T) {
+	rec := httptest.NewRecorder()
+	HandleHealth(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+}

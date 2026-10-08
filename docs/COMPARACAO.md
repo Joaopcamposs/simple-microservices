@@ -45,7 +45,7 @@ Diferença estrutural mais importante: o novo introduz um **hop a mais** (relay 
 | Falha do broker | Relay reconecta com backoff | Router e worker-go saem com erro; o compose reinicia. Workers Python usam `connect_robust` |
 | Falha de entrega ao router | Não se aplica | Contrato explícito: 202 → `sent`/`DISPATCHED`; 400/422 → `failed`/`FAILED`; 5xx/rede → `pending` (tenta de novo) |
 | Tipo desconhecido | Validado por schema do job no gateway | Router não acha worker → 422 → `FAILED` visível em `GET /jobs/{id}` |
-| Healthcheck do relay | `/healthz` e `/metrics` | Sem endpoint |
+| Healthcheck | `/healthz` e `/metrics` no relay | `/healthz` no relay (ping do Postgres, porta 8081) e no router; sem `/metrics` |
 | Purge/limpeza da outbox | Tem | Não tem |
 
 Resumo: o anterior é mais robusto na **borda do broker** (DLQ, `mandatory`, reconexão, métricas). O novo é mais claro na **borda do roteamento** (falha de tipo vira estado visível no job).
@@ -131,7 +131,7 @@ Ordem sugerida, por retorno sobre custo (ver também a seção "Melhorias futura
 
 1. ~~**DLQ**~~ feito em 2026-10-08, com `dlq-reaper` marcando o job `FAILED` (falta reenvio).
 2. ~~**`mandatory=true` + tratamento de `Return` no router**~~ feito em 2026-10-08.
-3. **`/healthz` no relay e no router**, com `depends_on: condition: service_healthy` no compose.
+3. ~~**`/healthz` no relay e no router**~~ feito em 2026-10-08; o relay só sobe com o router `healthy`.
 4. ~~**Teste e2e automatizado**~~ feito em 2026-10-08 (`make e2e`).
 5. ~~**Retry com contador**~~ feito em 2026-10-08 (workers go e asyncio; falta backoff exponencial e cobrir os bridges).
 
@@ -146,4 +146,4 @@ Ordem sugerida, por retorno sobre custo (ver também a seção "Melhorias futura
 
 Os projetos não competem: o anterior é a **medição**, o novo é a **explicação**. O novo é mais fácil de ler, mais fácil de operar e documenta melhor as decisões; o anterior é mais forte onde o sistema encontra o mundo real (broker instável, mensagem sem destino, carga alta, necessidade de medir).
 
-A maior fraqueza do novo é a falta de `/healthz` e de métricas: o retry é de atraso fixo e só cobre go e asyncio, e a mensagem morta não é reenviada, só marca o job `FAILED`. A maior fraqueza do anterior para estudo é o volume: o mecanismo essencial (outbox → broker → worker idempotente) fica diluído entre benchmark, observabilidade e workloads.
+A maior fraqueza do novo é a falta de métricas e trace: o retry é de atraso fixo e só cobre go e asyncio, e a mensagem morta não é reenviada, só marca o job `FAILED`. A maior fraqueza do anterior para estudo é o volume: o mecanismo essencial (outbox → broker → worker idempotente) fica diluído entre benchmark, observabilidade e workloads.

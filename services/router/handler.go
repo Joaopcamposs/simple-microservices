@@ -79,3 +79,9 @@ func writeError(w http.ResponseWriter, status int, detail string) {
 		slog.Error("write error response", "error", err)
 	}
 }
+
+// HandleHealth responde 200 enquanto o processo vive. Sem conexão com o broker o
+// router encerra (ver run), então processo de pé implica publisher conectado.
+func HandleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}

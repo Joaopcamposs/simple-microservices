@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,6 +38,13 @@ func run() error {
 		return err
 	}
 	dispatcher := NewDispatcher(env("ROUTER_URL", "http://localhost:8080/dispatch"))
+	mux := http.NewServeMux()
+	mux.Handle("GET /healthz", NewHealthHandler(pool))
+	go func() {
+		if err := http.ListenAndServe(env("ADDR", ":8081"), mux); err != nil {
+			slog.Error("health server", "error", err)
+		}
+	}()
 	slog.Info("polling outbox", "interval", interval.String())
 	NewRelay(pool, dispatcher, batchSize, interval).Run(ctx)
 	return nil

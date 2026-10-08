@@ -29,6 +29,7 @@ func run() error {
 	}()
 	mux := http.NewServeMux()
 	mux.Handle("POST /dispatch", NewDispatchHandler(DefaultRoutes(), pub))
+	mux.HandleFunc("GET /healthz", HandleHealth)
 	addr := env("ADDR", ":8080")
 	slog.Info("listening", "addr", addr)
 	serverErr := make(chan error, 1)

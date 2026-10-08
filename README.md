@@ -134,6 +134,7 @@ Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.a
 - **Ack:** worker só confirma a mensagem depois de gravar o resultado. Nos bridges, o ack vem depois de entregar a task ao broker do framework, que reconhece tarde (`acks_late` no Celery).
 - **Mensagem inválida:** `reject`/`nack` sem requeue e log; o broker move a mensagem para `jobs.dlq` (motivo no header `x-death`), e o `dlq-reaper` a consome: marca o job `FAILED` (exceto se já `DONE`) e dá ack. Corpo sem `job_id` válido é logado e descartado. Não há reenvio da DLQ.
 - **Retry (workers go e asyncio):** erro transitório (ex.: banco fora) não faz requeue imediato. O worker republica a mensagem (com confirm) na exchange `jobs.retry`, com o contador no header `x-attempt`; a fila `jobs.retry.<worker>` segura por 5 s (`x-message-ttl`) e devolve à fila de trabalho via `x-dead-letter-exchange: jobs`. São no máximo 3 execuções; esgotadas, `nack` sem requeue leva à DLQ e o `dlq-reaper` marca `FAILED`. Se a republicação falha, cai no `nack` com requeue. Atraso fixo, não exponencial. Os bridges Celery/TaskIQ não usam isso: o retry deles é do framework.
+- **Healthcheck:** `GET /healthz` no router (:8080) e no relay (:8081, faz ping no Postgres); o compose os usa em `healthcheck`, e o relay só sobe com o router `healthy`.
 - **Limites conscientes:** router e worker-go não reconectam sozinhos: ao perder o broker saem com erro e o compose os reinicia; a transação do relay fica aberta durante o POST.
 
 ---
