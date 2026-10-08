@@ -61,6 +61,17 @@ services:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
 
+  # Consome jobs.dlq (mensagens rejeitadas pelos workers) e marca o job FAILED.
+  dlq-reaper:
+    build: ./services/dlq-reaper
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
   # Consome jobs.asyncio (http.fetch) com aio-pika: uma task asyncio por mensagem.
   worker-asyncio:
     build: ./services/worker-asyncio

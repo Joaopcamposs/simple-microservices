@@ -2,7 +2,7 @@
 
 Guia para quem já domina HTTP, SQL, Docker e o básico de mensageria e quer entender **por que** este projeto é montado assim e **como** as peças se integram. O `README.md` diz o que existe; este arquivo explica as decisões, os mecanismos e as armadilhas.
 
-> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay`, `worker-go`, `worker-asyncio`, `worker-celery` e `worker-taskiq` existem e foram verificados. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
+> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay`, `worker-go`, `worker-asyncio`, `worker-celery`, `worker-taskiq` e `dlq-reaper` existem e foram verificados. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
 
 ---
 
@@ -273,7 +273,7 @@ Carregar `definitions.json` **substitui** o usuário padrão do broker: sem uma 
 ### Ack, nack e garantias
 
 - Consumidores usam **ack manual**: só confirmam depois de gravar o resultado. Se o worker morre no meio, a mensagem volta à fila.
-- Mensagem inválida (JSON quebrado, campo faltando): `reject`/`nack` **sem requeue** e log. Reenfileirar uma mensagem que nunca vai parsear criaria loop infinito. As filas têm `x-dead-letter-exchange: jobs.dlx`, então o broker entrega a mensagem rejeitada em `jobs.dlq` (header `x-death` guarda fila de origem e motivo). Os workers não mudam: o `reject` que já faziam dispara a DLQ. O job fica `DISPATCHED`, pois nada consome a DLQ. Argumentos de fila não mudam depois de criada: mudar a topologia exige `make down` (recria o broker).
+- Mensagem inválida (JSON quebrado, campo faltando): `reject`/`nack` **sem requeue** e log. Reenfileirar uma mensagem que nunca vai parsear criaria loop infinito. As filas têm `x-dead-letter-exchange: jobs.dlx`, então o broker entrega a mensagem rejeitada em `jobs.dlq` (header `x-death` guarda fila de origem e motivo). Os workers não mudam: o `reject` que já faziam dispara a DLQ. O serviço `dlq-reaper` consome a DLQ, extrai o `job_id` do corpo e faz `UPDATE jobs SET status='FAILED' WHERE id=$1 AND status<>'DONE'` antes do ack; corpo sem `job_id` UUID válido é logado e descartado, e erro do banco faz nack com requeue. Argumentos de fila não mudam depois de criada: mudar a topologia exige `make down` (recria o broker).
 - `prefetch` limita quantas mensagens um consumidor mantém sem ack; é também o limite de concorrência do worker Go (uma goroutine por mensagem).
 
 ---
@@ -414,6 +414,7 @@ O campo que une tudo é `job_id`: o mesmo id aparece em cada etapa, então `dock
 | router | `job published` (com `worker`) / `unknown job type` | INFO / WARN |
 | relay | `job delivered` / `job rejected, marked failed` / `job delivery failed, will retry` | INFO / WARN |
 | worker-go | `job done` / `unsupported job type, rejected` / `job failed, requeued` | INFO / WARN / ERROR |
+| dlq-reaper | `dead message, job marked failed` / `dead message without usable job_id, dropped` / `mark failed, requeued` | INFO / WARN / ERROR |
 
 Convenção de nível: INFO é o caminho normal; WARN é falha esperada que o sistema trata (type desconhecido, router fora, mensagem rejeitada); ERROR é algo inesperado (banco, ack).
 
@@ -446,7 +447,7 @@ As regras do `AGENTS.md` não são estilo, são o que mantém as fronteiras:
 
 ### Extensões para praticar
 
-- Retry com backoff e consumidor da `jobs.dlq` (reenvio ou marcar o job `FAILED`).
+- Retry com backoff e reenvio de mensagens da `jobs.dlq` (hoje o `dlq-reaper` só marca o job `FAILED`).
 - Lease/`in_flight` na outbox para não segurar transação durante o POST do relay.
 - Reconexão automática do router e dos workers.
 - `traceparent` no envelope e OpenTelemetry ponta a ponta.

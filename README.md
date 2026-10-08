@@ -71,6 +71,7 @@ Os dois frameworks têm formato de mensagem próprio e o envelope neutro não é
 | `services/worker-taskiq` | Python | — | bridge aio-pika + task TaskIQ |
 | `services/worker-asyncio` | Python | — | aio-pika puro |
 | `services/worker-go` | Go | — | consumer + uma goroutine por mensagem (limitada pelo prefetch) |
+| `services/dlq-reaper` | Go | — | consome `jobs.dlq` e marca o job `FAILED` |
 
 Swagger: gateway-py em `http://localhost:58001/docs`; gateway-go em `http://localhost:58002/docs/index.html`. RabbitMQ management: `http://localhost:55673` (guest/guest).
 
@@ -131,7 +132,7 @@ Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.a
 - **At-least-once:** o relay pode reenviar se cair entre o 2xx e o `UPDATE`.
 - **Idempotência:** resultado gravado por `(job_id, worker)` com `ON CONFLICT DO NOTHING`; o mesmo `job_id` duas vezes não duplica.
 - **Ack:** worker só confirma a mensagem depois de gravar o resultado. Nos bridges, o ack vem depois de entregar a task ao broker do framework, que reconhece tarde (`acks_late` no Celery).
-- **Mensagem inválida:** `reject`/`nack` sem requeue e log; o broker move a mensagem para `jobs.dlq` (motivo no header `x-death`), onde fica para inspeção. O job continua `DISPATCHED` (nada o marca `FAILED`) e não há retry com backoff.
+- **Mensagem inválida:** `reject`/`nack` sem requeue e log; o broker move a mensagem para `jobs.dlq` (motivo no header `x-death`), e o `dlq-reaper` a consome: marca o job `FAILED` (exceto se já `DONE`) e dá ack. Corpo sem `job_id` válido é logado e descartado. Não há retry com backoff nem reenvio.
 - **Limites conscientes:** router e worker-go não reconectam sozinhos: ao perder o broker saem com erro e o compose os reinicia; a transação do relay fica aberta durante o POST.
 
 ---
@@ -172,7 +173,7 @@ Testes rodam por serviço (`go test ./...` ou `uv run pytest -x --tb=short -q <a
 simple-microservices/
 ├── services/
 │   ├── gateway-py/  gateway-go/  relay/  router/
-│   └── worker-celery/  worker-taskiq/  worker-asyncio/  worker-go/
+│   └── worker-celery/  worker-taskiq/  worker-asyncio/  worker-go/  dlq-reaper/
 ├── contracts/envelope.schema.json
 ├── db/init.sql
 ├── infra/rabbitmq/{definitions.json,rabbitmq.conf}
@@ -229,7 +230,7 @@ Ideias que ampliam o propósito de estudo, ordenadas por valor. Nenhuma está im
 ### Alto valor, custo baixo
 
 1. **Teste e2e versionado (`make e2e`):** os 8 jobs (2 gateways × 4 types), o `type` desconhecido em `FAILED` e o router parado sem derrubar o `POST`. Hoje essa verificação é manual (Fases, item 11); virar script protege a arquitetura contra regressão.
-2. **Retry com backoff e fechar o ciclo da DLQ:** erro transitório faz requeue imediato, e a `jobs.dlq` só guarda a mensagem inválida: nada a reenvia nem marca o job `FAILED`. Um contador de tentativas e um consumidor da DLQ completam o ciclo de falha.
+2. **Retry com backoff:** erro transitório faz requeue imediato, sem limite de tentativas. Um contador de tentativas e o reenvio de mensagens da `jobs.dlq` completam o ciclo de falha (hoje o `dlq-reaper` só marca `FAILED`).
 3. **Comparar os workers com trabalho real:** os quatro executam a mesma tarefa trivial. Trocar o `sleep` por I/O bloqueante e CPU, e medir o tempo até `DONE` de N jobs por worker, mostra na prática quando usar Celery, TaskIQ, asyncio ou Go.
 
 ### Valor médio

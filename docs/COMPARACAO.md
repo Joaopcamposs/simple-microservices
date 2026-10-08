@@ -40,7 +40,7 @@ Diferença estrutural mais importante: o novo introduz um **hop a mais** (relay 
 | Concorrência do relay | `FOR UPDATE SKIP LOCKED`, lote de 100 | `FOR UPDATE SKIP LOCKED` |
 | Idempotência | `ON CONFLICT` em `(job_id, worker)` | Idem |
 | Publicação sem destino | `mandatory=true` + `NotifyReturn`: mensagem sem fila é detectada | Idem (`mandatory=true` + `NotifyReturn` no router): vira `ErrUnroutable` → 502 → outbox `pending`, tenta de novo |
-| Mensagem inválida | Rejeitada para DLQ (`jobs.dlx → jobs.dlq`) | `reject`/`nack` sem requeue, com DLQ (`jobs.dlx → jobs.dlq`); nada consome a DLQ nem marca o job `FAILED` |
+| Mensagem inválida | Rejeitada para DLQ (`jobs.dlx → jobs.dlq`) | `reject`/`nack` sem requeue, com DLQ (`jobs.dlx → jobs.dlq`); o `dlq-reaper` marca o job `FAILED` e descarta a mensagem (sem reenvio) |
 | Retry | Campo `attempt` no envelope | Não há; falha vira `FAILED` |
 | Falha do broker | Relay reconecta com backoff | Router e worker-go saem com erro; o compose reinicia. Workers Python usam `connect_robust` |
 | Falha de entrega ao router | Não se aplica | Contrato explícito: 202 → `sent`/`DISPATCHED`; 400/422 → `failed`/`FAILED`; 5xx/rede → `pending` (tenta de novo) |
@@ -129,7 +129,7 @@ Os dois usam o padrão bridge para Celery e TaskIQ (consumidor fino lê a fila d
 
 Ordem sugerida, por retorno sobre custo (ver também a seção "Melhorias futuras" do README):
 
-1. ~~**DLQ**~~ feito em 2026-10-08 (falta consumidor/reenvio).
+1. ~~**DLQ**~~ feito em 2026-10-08, com `dlq-reaper` marcando o job `FAILED` (falta reenvio).
 2. ~~**`mandatory=true` + tratamento de `Return` no router**~~ feito em 2026-10-08.
 3. **`/healthz` no relay e no router**, com `depends_on: condition: service_healthy` no compose.
 4. **Teste e2e automatizado** reproduzindo o roteiro manual atual.
@@ -146,4 +146,4 @@ Ordem sugerida, por retorno sobre custo (ver também a seção "Melhorias futura
 
 Os projetos não competem: o anterior é a **medição**, o novo é a **explicação**. O novo é mais fácil de ler, mais fácil de operar e documenta melhor as decisões; o anterior é mais forte onde o sistema encontra o mundo real (broker instável, mensagem sem destino, carga alta, necessidade de medir).
 
-A maior fraqueza do novo é que nada consome a DLQ: mensagem inválida fica guardada, mas o job continua `DISPATCHED` e não há retry. A maior fraqueza do anterior para estudo é o volume: o mecanismo essencial (outbox → broker → worker idempotente) fica diluído entre benchmark, observabilidade e workloads.
+A maior fraqueza do novo é a falta de retry: erro transitório faz requeue sem limite e mensagem morta não é reenviada, só marca o job `FAILED`. A maior fraqueza do anterior para estudo é o volume: o mecanismo essencial (outbox → broker → worker idempotente) fica diluído entre benchmark, observabilidade e workloads.
