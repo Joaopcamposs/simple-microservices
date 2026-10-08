@@ -6,6 +6,7 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-07
 
+- **docs:** README ganha a seção 12 com melhorias futuras (e2e versionado, retry/DLQ, comparação de workers, roteamento configurável, trace id, métricas, pool, idempotency key, CI).
 - **gateway-py (logs):** log em JSON no mesmo formato dos demais serviços (`app/logs.py`), incluindo o access log do uvicorn; `POST /jobs` loga `job accepted` com `job_id`. `make logs-jobs` passa a mostrar os jobs que entram pelo gateway-py.
 - **worker-taskiq (Python):** bridge aio-pika (`jobs.taskiq` → `process_job.kiq`) e worker TaskIQ assíncrono gravam resultado idempotente e marcam `DONE` para `email.send`. Dois serviços no compose.
 - **docs/make:** `make logs-jobs` mostra uma linha por etapa do job (com `JOB=<id>` filtra um job); `docs/OBSERVABILIDADE.md` ensina a acompanhar logs, RabbitMQ e banco e a achar onde um job parou.

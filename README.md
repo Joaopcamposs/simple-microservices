@@ -218,3 +218,27 @@ Cada fase muda **uma linguagem** (ou só infra/docs) e termina com verificação
 | Mensageria | RabbitMQ | RabbitMQ |
 | Banco | Postgres | Postgres |
 | Orquestração | Docker Compose | Docker Compose |
+
+---
+
+## 12. Melhorias futuras
+
+Ideias que ampliam o propósito de estudo, ordenadas por valor. Nenhuma está implementada; as fora de escopo da seção 1 continuam fora.
+
+### Alto valor, custo baixo
+
+1. **Teste e2e versionado (`make e2e`):** os 8 jobs (2 gateways × 4 types), o `type` desconhecido em `FAILED` e o router parado sem derrubar o `POST`. Hoje essa verificação é manual (Fases, item 11); virar script protege a arquitetura contra regressão.
+2. **Retry com backoff e DLQ:** erro transitório faz requeue imediato e mensagem inválida é descartada. Uma fila `jobs.dlq` no `definitions.json` e um contador de tentativas completam o ciclo de falha.
+3. **Comparar os workers com trabalho real:** os quatro executam a mesma tarefa trivial. Trocar o `sleep` por I/O bloqueante e CPU, e medir o tempo até `DONE` de N jobs por worker, mostra na prática quando usar Celery, TaskIQ, asyncio ou Go.
+
+### Valor médio
+
+4. **Tabela de roteamento fora do código:** ler `type → worker` de arquivo, variável de ambiente ou tabela do Postgres, para trocar o worker de um tipo sem rebuild do router.
+5. **`trace_id` no envelope:** propagado pelos serviços, além do `job_id`; primeiro passo para OpenTelemetry sem montar Grafana/Prometheus.
+6. **Métricas simples:** `GET /metrics` no relay com jobs por status e idade da outbox mais antiga, para saber se ela está acumulando sem abrir o banco.
+
+### Mais perto de produção (se o objetivo mudar)
+
+7. **Pool de conexões nos workers** (`psycopg_pool`) e **graceful shutdown** nos workers Python. Hoje cada `save` abre uma conexão curta: suficiente para a demo, gargalo só com volume alto.
+8. **Idempotency key no `POST /jobs`** (o cliente que reenvia hoje cria um job novo) e **autenticação** nos gateways.
+9. **CI** rodando lint e testes.
