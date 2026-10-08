@@ -6,6 +6,7 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-08
 
+- **e2e:** `make e2e` (`e2e/e2e.py`, só biblioteca padrão) roda seis cenários na stack no ar: 4 workers × 2 gateways em `DONE`, idempotência na reentrega, `type` desconhecido em `FAILED`, router parado (`PENDING` → `DONE`), fila sem binding (`mandatory`) e mensagem morta na DLQ marcando `FAILED`. Zera jobs/outbox/resultados. `make ruff` passa a cobrir `e2e/`.
 - **dlq-reaper (Go):** novo serviço que consome `jobs.dlq`, marca o job `FAILED` (exceto `DONE`) e dá ack; corpo sem `job_id` válido é logado e descartado; erro do banco devolve a mensagem à fila. Antes o job de uma mensagem morta ficava `DISPATCHED` para sempre.
 - **infra (DLQ):** `definitions.json` ganha a exchange `jobs.dlx` (fanout), a fila `jobs.dlq` e `x-dead-letter-exchange` nas quatro filas de trabalho. Mensagem rejeitada sem requeue agora fica em `jobs.dlq` com `x-death`, em vez de sumir. Workers sem mudança. Recriar o broker (`make down && make up`) para aplicar.
 - **router (fix):** publica com `mandatory=true` e trata `basic.return` (`ErrUnroutable`). Antes, routing key sem fila bound era confirmada e descartada, deixando o job `DISPATCHED` para sempre; agora responde 502 e o relay tenta de novo. Teste de integração opcional (`TEST_AMQP_URL`).

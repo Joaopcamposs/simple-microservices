@@ -159,6 +159,7 @@ Qualidade e testes:
 ```bash
 make ruff      # lint + formato dos serviços Python
 make ty        # checagem de tipos (ty) dos serviços Python
+make e2e       # teste de ponta a ponta da stack no ar (zera o banco)
 make vet       # go vet + gofmt dos serviços Go
 make swagger   # regenera o OpenAPI do gateway-go
 ```
@@ -174,6 +175,7 @@ simple-microservices/
 ├── services/
 │   ├── gateway-py/  gateway-go/  relay/  router/
 │   └── worker-celery/  worker-taskiq/  worker-asyncio/  worker-go/  dlq-reaper/
+├── e2e/e2e.py                  # `make e2e`: cenários de ponta a ponta
 ├── contracts/envelope.schema.json
 ├── db/init.sql
 ├── infra/rabbitmq/{definitions.json,rabbitmq.conf}
@@ -205,7 +207,7 @@ Cada fase muda **uma linguagem** (ou só infra/docs) e termina com verificação
 | 8 | `worker-asyncio` | Python | job `http.fetch` chega a `DONE` |
 | 9 | `worker-celery` | Python | job `report.generate` chega a `DONE` |
 | 10 | `worker-taskiq` | Python | job `email.send` chega a `DONE` |
-| 11 | Verificação ponta a ponta | — | 8 jobs (2 gateways × 4 types) em `DONE`; `type` desconhecido em `FAILED`; router parado não derruba o `POST` |
+| 11 | Verificação ponta a ponta | Python (`e2e/e2e.py`) | `make e2e`: 8 jobs (2 gateways × 4 types) em `DONE`; `type` desconhecido em `FAILED`; router parado não derruba o `POST`; fila sem binding e DLQ |
 | 12 | Revisão final deste README contra o código | docs | portas, serviços e comandos conferem |
 
 ---
@@ -229,18 +231,17 @@ Ideias que ampliam o propósito de estudo, ordenadas por valor. Nenhuma está im
 
 ### Alto valor, custo baixo
 
-1. **Teste e2e versionado (`make e2e`):** os 8 jobs (2 gateways × 4 types), o `type` desconhecido em `FAILED` e o router parado sem derrubar o `POST`. Hoje essa verificação é manual (Fases, item 11); virar script protege a arquitetura contra regressão.
-2. **Retry com backoff:** erro transitório faz requeue imediato, sem limite de tentativas. Um contador de tentativas e o reenvio de mensagens da `jobs.dlq` completam o ciclo de falha (hoje o `dlq-reaper` só marca `FAILED`).
-3. **Comparar os workers com trabalho real:** os quatro executam a mesma tarefa trivial. Trocar o `sleep` por I/O bloqueante e CPU, e medir o tempo até `DONE` de N jobs por worker, mostra na prática quando usar Celery, TaskIQ, asyncio ou Go.
+1. **Retry com backoff:** erro transitório faz requeue imediato, sem limite de tentativas. Um contador de tentativas e o reenvio de mensagens da `jobs.dlq` completam o ciclo de falha (hoje o `dlq-reaper` só marca `FAILED`).
+2. **Comparar os workers com trabalho real:** os quatro executam a mesma tarefa trivial. Trocar o `sleep` por I/O bloqueante e CPU, e medir o tempo até `DONE` de N jobs por worker, mostra na prática quando usar Celery, TaskIQ, asyncio ou Go.
 
 ### Valor médio
 
-4. **Tabela de roteamento fora do código:** ler `type → worker` de arquivo, variável de ambiente ou tabela do Postgres, para trocar o worker de um tipo sem rebuild do router.
-5. **`trace_id` no envelope:** propagado pelos serviços, além do `job_id`; primeiro passo para OpenTelemetry sem montar Grafana/Prometheus.
-6. **Métricas simples:** `GET /metrics` no relay com jobs por status e idade da outbox mais antiga, para saber se ela está acumulando sem abrir o banco.
+3. **Tabela de roteamento fora do código:** ler `type → worker` de arquivo, variável de ambiente ou tabela do Postgres, para trocar o worker de um tipo sem rebuild do router.
+4. **`trace_id` no envelope:** propagado pelos serviços, além do `job_id`; primeiro passo para OpenTelemetry sem montar Grafana/Prometheus.
+5. **Métricas simples:** `GET /metrics` no relay com jobs por status e idade da outbox mais antiga, para saber se ela está acumulando sem abrir o banco.
 
 ### Mais perto de produção (se o objetivo mudar)
 
-7. **Pool de conexões nos workers** (`psycopg_pool`) e **graceful shutdown** nos workers Python. Hoje cada `save` abre uma conexão curta: suficiente para a demo, gargalo só com volume alto.
-8. **Idempotency key no `POST /jobs`** (o cliente que reenvia hoje cria um job novo) e **autenticação** nos gateways.
-9. **CI** rodando lint e testes.
+6. **Pool de conexões nos workers** (`psycopg_pool`) e **graceful shutdown** nos workers Python. Hoje cada `save` abre uma conexão curta: suficiente para a demo, gargalo só com volume alto.
+7. **Idempotency key no `POST /jobs`** (o cliente que reenvia hoje cria um job novo) e **autenticação** nos gateways.
+8. **CI** rodando lint e testes.
