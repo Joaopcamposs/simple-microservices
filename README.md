@@ -2,7 +2,7 @@
 
 Demo minimalista de arquitetura desacoplada. Dois gateways (Python e Go) gravam o job numa **outbox**; um **relay** entrega a um **router** (webhook) que decide qual worker processa: Celery, TaskIQ, asyncio ou goroutine. Código enxuto, só para mostrar a arquitetura.
 
-Guia de estudo (mecanismos e decisões): `docs/ESTUDO.md`. Spec: `docs/superpowers/specs/2026-10-07-simple-microservices-design.md`. Plano: `docs/superpowers/plans/2026-10-07-simple-microservices.md`.
+Guia de estudo (mecanismos e decisões): `docs/ESTUDO.md`. Logs, RabbitMQ e como acompanhar um job: `docs/OBSERVABILIDADE.md`. Spec: `docs/superpowers/specs/2026-10-07-simple-microservices-design.md`. Plano: `docs/superpowers/plans/2026-10-07-simple-microservices.md`.
 
 ---
 
@@ -140,7 +140,8 @@ Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.a
 
 ```bash
 make up        # sobe tudo (docker compose up -d --build)
-make logs      # acompanha os logs
+make logs      # acompanha os logs de todos os serviços
+make logs-jobs # só o caminho dos jobs (requer jq); JOB=<id> filtra um job
 make down      # derruba e apaga volumes
 ```
 
@@ -174,7 +175,7 @@ simple-microservices/
 ├── contracts/envelope.schema.json
 ├── db/init.sql
 ├── infra/rabbitmq/{definitions.json,rabbitmq.conf}
-├── docs/{ESTUDO.md,superpowers/{specs,plans}/}
+├── docs/{ESTUDO.md,OBSERVABILIDADE.md,superpowers/{specs,plans}/}
 ├── docker-compose.yml
 ├── Makefile
 ├── CHANGELOG.md

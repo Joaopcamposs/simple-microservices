@@ -2,7 +2,7 @@
 
 Guia para quem já domina HTTP, SQL, Docker e o básico de mensageria e quer entender **por que** este projeto é montado assim e **como** as peças se integram. O `README.md` diz o que existe; este arquivo explica as decisões, os mecanismos e as armadilhas.
 
-> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay` e `worker-go` e `worker-asyncio` existem e foram verificados. Os workers Celery e TaskIQ estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
+> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay`, `worker-go`, `worker-asyncio` e `worker-celery` existem e foram verificados. O worker TaskIQ está especificado em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entra na próxima etapa. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
 
 ---
 
@@ -337,6 +337,25 @@ Celery e TaskIQ esperam mensagens **no formato próprio** (headers, serializaç�
 
 Implicação de ack: o bridge confirma a mensagem do RabbitMQ **depois de entregar a task ao broker do framework**, não depois do processamento. Para a garantia não ficar mais fraca, o Celery roda com `acks_late` (só confirma a task quando termina). Esse é o tipo de detalhe que separa "funciona na demo" de "perde job quando o worker cai".
 
+### worker-celery [implementado]
+
+Dois containers, mesma imagem (`services/worker-celery`), processos diferentes escolhidos pelo `command` do compose:
+
+| Arquivo | Papel |
+|---|---|
+| `app/bridge.py` | classe `Bridge`: consome `jobs.celery` com aio-pika, valida o envelope e chama `process_job.delay(...)` numa thread (`asyncio.to_thread`, porque o `delay` bloqueia). Ack só depois do `delay`; inválida: `reject` sem requeue |
+| `app/tasks.py` | app Celery e a task `process_job`: espera 0,2 s, grava o resultado e loga `job done` |
+| `app/store.py` | `ResultStore` **síncrono** (`psycopg.connect`): o Celery roda tasks em processos filhos, sem event loop |
+| `app/logs.py`, `app/models.py` | mesmo log JSON e mesmos modelos do worker-asyncio |
+
+Detalhes que valem estudar:
+
+- **Dois ack, duas garantias.** O bridge confirma `jobs.celery` quando a task entrou na fila interna `celery`; dali em diante vale `task_acks_late=True`: o Celery só confirma depois de a task terminar. Worker morto no meio devolve a task à fila.
+- **`worker_prefetch_multiplier=1`:** cada processo reserva uma task por vez; sem isso um job lento seguraria outros já reservados. `--concurrency=4` define os 4 processos.
+- **Remote control desligado:** o Celery usa filas transient não-exclusivas (pidbox, mingle, gossip) para `inspect`/`revoke`. O RabbitMQ recente recusa esse tipo de fila (`transient_nonexcl_queues` deprecated), e o worker entrava em loop de "Connection to broker lost". Como a demo não usa esses comandos, `worker_enable_remote_control=False` e `--without-mingle --without-gossip`.
+- **Log:** o sinal `setup_logging` troca o formato do Celery pelo JSON do projeto.
+- **PATH:** o Dockerfile coloca `/app/.venv/bin` no `PATH`, assim o compose chama `celery` e `python` direto.
+
 ### Idempotência
 
 Como a entrega é at-least-once, o mesmo `job_id` pode chegar duas vezes. Cada worker faz:
@@ -364,6 +383,8 @@ Cortes deliberados do projeto anterior: benchmark, OpenTelemetry/Grafana/Prometh
 ---
 
 ## 10.1 Logs e rastreio de um job **[serviços Go]**
+
+> Passo a passo prático (comandos, RabbitMQ, banco, diagnóstico): `docs/OBSERVABILIDADE.md`.
 
 Cada serviço Go loga em JSON, uma linha por evento, via `log/slog`. O `main` configura o logger uma vez (`slog.SetDefault(...).With("service", "<nome>")`) e o resto do código só chama `slog.Info/Warn/Error`. Sem biblioteca extra e sem logger passado por parâmetro.
 

@@ -6,6 +6,8 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-07
 
+- **docs/make:** `make logs-jobs` mostra uma linha por etapa do job (com `JOB=<id>` filtra um job); `docs/OBSERVABILIDADE.md` ensina a acompanhar logs, RabbitMQ e banco e a achar onde um job parou.
+- **worker-celery (Python):** bridge aio-pika (`jobs.celery` → `process_job.delay`) e worker Celery (`acks_late`, prefetch 1, 4 processos) gravam resultado idempotente e marcam `DONE` para `report.generate`. Dois serviços no compose; remote control do Celery desligado por causa das filas transient recusadas pelo RabbitMQ atual.
 - **router, worker-go (fix):** se o RabbitMQ derruba a conexão, o processo sai com erro e o compose o reinicia. Antes o router continuava vivo respondendo 502 indefinidamente.
 - **worker-asyncio (Python):** consome `jobs.asyncio` (`http.fetch`) com aio-pika, grava resultado idempotente e marca `DONE`; ack só após gravar. Logs em JSON (`app/logs.py`) no mesmo formato dos serviços Go. Entra no compose.
 - **logs (Go):** gateway-go, router, relay e worker-go passam a logar em JSON com `log/slog`, com `service` e `job_id` em cada etapa; gateway-go em modo release com access log no mesmo formato. Falhas esperadas (type desconhecido, rejeição, retry) agora aparecem nos logs.

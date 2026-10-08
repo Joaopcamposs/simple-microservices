@@ -70,6 +70,28 @@ services:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
 
+  # Celery: bridge lê jobs.celery e chama process_job.delay; o worker executa a task.
+  worker-celery-bridge:
+    build: ./services/worker-celery
+    command: python -m app.bridge
+    restart: unless-stopped
+    environment:
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  worker-celery:
+    build: ./services/worker-celery
+    command: celery -A app.tasks worker --concurrency=4 --loglevel=info --without-mingle --without-gossip
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
   gateway-py:
     build: ./services/gateway-py
     restart: unless-stopped
