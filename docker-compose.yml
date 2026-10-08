@@ -1,6 +1,7 @@
 # Demo: gateways -> outbox -> relay -> router -> RabbitMQ -> workers.
-# Serviços de aplicação são adicionados nas tasks de cada serviço.
+# Portas do host são alternativas (58xxx/55xxx) para não colidir com serviços locais.
 services:
+  # Banco único: jobs, outbox e job_results (schema em db/init.sql).
   postgres:
     image: postgres:17-alpine
     environment:
@@ -16,6 +17,7 @@ services:
       interval: 3s
       retries: 20
 
+  # Broker: topologia (exchange jobs + filas jobs.*) vem de infra/rabbitmq/definitions.json.
   rabbitmq:
     image: rabbitmq:4-management-alpine
     ports: ["55672:5672", "55673:15672"]
@@ -81,6 +83,7 @@ services:
     depends_on:
       rabbitmq: { condition: service_healthy }
 
+  # Executa a task Celery (acks_late, 4 processos) alimentada pelo bridge.
   worker-celery:
     build: ./services/worker-celery
     command: celery -A app.tasks worker --concurrency=4 --loglevel=info --without-mingle --without-gossip
@@ -103,6 +106,7 @@ services:
     depends_on:
       rabbitmq: { condition: service_healthy }
 
+  # Executa a task TaskIQ (async, 1 processo) alimentada pelo bridge.
   worker-taskiq:
     build: ./services/worker-taskiq
     command: taskiq worker app.tasks:broker --workers 1
@@ -114,6 +118,7 @@ services:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
 
+  # API FastAPI: grava job + outbox numa transação e responde 202.
   gateway-py:
     build: ./services/gateway-py
     restart: unless-stopped
@@ -123,6 +128,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  # API Gin com o mesmo contrato do gateway-py.
   gateway-go:
     build: ./services/gateway-go
     restart: unless-stopped

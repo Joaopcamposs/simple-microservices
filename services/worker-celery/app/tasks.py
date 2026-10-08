@@ -8,7 +8,6 @@ fila é o bridge (bridge.py).
 import logging
 import os
 import time
-from typing import Any
 
 from celery import Celery
 from celery.signals import setup_logging
@@ -33,7 +32,7 @@ app.conf.worker_enable_remote_control = False
 
 
 @setup_logging.connect
-def configure_logging(**_: Any) -> None:
+def configure_logging(**_: object) -> None:
     """Troca o formato de log do Celery pelo JSON do projeto (sinal chamado no boot)."""
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter("worker-celery"))
