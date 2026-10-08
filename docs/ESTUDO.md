@@ -2,7 +2,7 @@
 
 Guia para quem já domina HTTP, SQL, Docker e o básico de mensageria e quer entender **por que** este projeto é montado assim e **como** as peças se integram. O `README.md` diz o que existe; este arquivo explica as decisões, os mecanismos e as armadilhas.
 
-> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay`, `worker-go`, `worker-asyncio` e `worker-celery` existem e foram verificados. O worker TaskIQ está especificado em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entra na próxima etapa. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
+> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay`, `worker-go`, `worker-asyncio`, `worker-celery` e `worker-taskiq` existem e foram verificados. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
 
 ---
 
@@ -355,6 +355,24 @@ Detalhes que valem estudar:
 - **Remote control desligado:** o Celery usa filas transient não-exclusivas (pidbox, mingle, gossip) para `inspect`/`revoke`. O RabbitMQ recente recusa esse tipo de fila (`transient_nonexcl_queues` deprecated), e o worker entrava em loop de "Connection to broker lost". Como a demo não usa esses comandos, `worker_enable_remote_control=False` e `--without-mingle --without-gossip`.
 - **Log:** o sinal `setup_logging` troca o formato do Celery pelo JSON do projeto.
 - **PATH:** o Dockerfile coloca `/app/.venv/bin` no `PATH`, assim o compose chama `celery` e `python` direto.
+
+### worker-taskiq [implementado]
+
+Mesmo desenho do celery (bridge + worker, uma imagem, `command` do compose escolhe o processo), mas **tudo assíncrono**:
+
+| Arquivo | Papel |
+|---|---|
+| `app/bridge.py` | classe `Bridge`: consome `jobs.taskiq`, valida e faz `await process_job.kiq(...)`; ack só depois do `kiq`. Chama `broker.startup()` antes de consumir |
+| `app/tasks.py` | `AioPikaBroker` e a task `async def process_job`: espera 0,2 s, grava o resultado e loga `job done` |
+| `app/store.py` | o mesmo `ResultStore` assíncrono do worker-asyncio |
+
+Diferenças em relação ao Celery, boas para comparar:
+
+- **`kiq` é corrotina:** o bridge dá `await` direto; no Celery `delay` bloqueia e vai para uma thread.
+- **Task assíncrona:** roda no event loop do worker (`--workers 1` é um processo; a concorrência vem do `await`). O Celery usa 4 processos.
+- **Filas do framework:** o `AioPikaBroker` cria o exchange e a fila `taskiq` (e `taskiq.dead_letter`) sozinho. Nenhuma configuração extra de remote control, como no Celery.
+- **Ack:** o worker TaskIQ confirma a mensagem só depois de executar a task, equivalente ao `acks_late`.
+- **Log:** o evento `WORKER_STARTUP` troca o formato do TaskIQ pelo JSON do projeto.
 
 ### Idempotência
 

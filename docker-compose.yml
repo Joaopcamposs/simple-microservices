@@ -92,6 +92,28 @@ services:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
 
+  # TaskIQ: bridge lê jobs.taskiq e chama process_job.kiq; o worker executa a task.
+  worker-taskiq-bridge:
+    build: ./services/worker-taskiq
+    command: python -m app.bridge
+    restart: unless-stopped
+    environment:
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+      TASKIQ_BROKER_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  worker-taskiq:
+    build: ./services/worker-taskiq
+    command: taskiq worker app.tasks:broker --workers 1
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+      TASKIQ_BROKER_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
   gateway-py:
     build: ./services/gateway-py
     restart: unless-stopped

@@ -1,0 +1,11 @@
+[project]
+name = "worker-taskiq"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = ["taskiq", "taskiq-aio-pika", "aio-pika", "psycopg[binary]", "pydantic"]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

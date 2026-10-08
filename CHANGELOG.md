@@ -6,6 +6,7 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-07
 
+- **worker-taskiq (Python):** bridge aio-pika (`jobs.taskiq` → `process_job.kiq`) e worker TaskIQ assíncrono gravam resultado idempotente e marcam `DONE` para `email.send`. Dois serviços no compose.
 - **docs/make:** `make logs-jobs` mostra uma linha por etapa do job (com `JOB=<id>` filtra um job); `docs/OBSERVABILIDADE.md` ensina a acompanhar logs, RabbitMQ e banco e a achar onde um job parou.
 - **worker-celery (Python):** bridge aio-pika (`jobs.celery` → `process_job.delay`) e worker Celery (`acks_late`, prefetch 1, 4 processos) gravam resultado idempotente e marcam `DONE` para `report.generate`. Dois serviços no compose; remote control do Celery desligado por causa das filas transient recusadas pelo RabbitMQ atual.
 - **router, worker-go (fix):** se o RabbitMQ derruba a conexão, o processo sai com erro e o compose o reinicia. Antes o router continuava vivo respondendo 502 indefinidamente.

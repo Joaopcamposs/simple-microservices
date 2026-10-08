@@ -14,7 +14,7 @@ Todo serviço loga em JSON com `service` e, quando há job, `job_id`. Um job `re
 | 4 | worker-celery-bridge | `job handed to celery` | entregou a task ao Celery |
 | 5 | worker-celery | `job done` | gravou o resultado, job `DONE` |
 
-Nos outros workers o passo 4 não existe: `worker-go` e `worker-asyncio` logam `job done` direto.
+O `worker-taskiq` segue o mesmo caminho, com `job handed to taskiq` e `job done` (a fila interna é `taskiq`). Nos outros workers o passo 4 não existe: `worker-go` e `worker-asyncio` logam `job done` direto.
 
 Mensagens de falha: `unknown job type` e `publish failed` (router), `router replied with error` e `job delivery failed, will retry` (relay), `invalid message, rejected` (workers Python), `invalid envelope` (router).
 
@@ -70,7 +70,7 @@ Pelo terminal:
 docker exec simple-microservices-rabbitmq-1 rabbitmqctl list_queues name messages consumers
 ```
 
-`consumers` deve ser ≥ 1 em `jobs.celery`, `jobs.asyncio`, `jobs.go` e `celery`. Zero significa consumer caído.
+`consumers` deve ser ≥ 1 em `jobs.celery`, `jobs.taskiq`, `jobs.asyncio`, `jobs.go`, `celery` e `taskiq`. Zero significa consumer caído.
 
 ## 4. Banco
 
@@ -92,17 +92,19 @@ docker exec simple-microservices-postgres-1 psql -U app -c \
 | `FAILED` | `type` desconhecido: log `unknown job type` no router |
 | `DONE` | `GET /jobs/{id}` traz `results[]` |
 
-## 6. Testes de robustez (celery)
+## 6. Testes de robustez (celery e taskiq)
+
+Valem para os dois; troque `celery` por `taskiq` (routing key, fila interna, serviço).
 
 - **Idempotência:** no management, *Exchanges → jobs → Publish message*, routing key `celery`, com o envelope do job (`select envelope from outbox where job_id = '...'`). O job continua com uma linha em `results`; o bridge loga `job handed to celery` de novo, o que é esperado.
 - **Mensagem inválida:** publique `{"x":1}` do mesmo jeito. O bridge loga `invalid message, rejected` e a fila volta a 0, sem requeue.
-- **Worker parado:** `docker compose stop worker-celery`, crie um job: fica `DISPATCHED` e a fila `celery` guarda a task. Depois de `docker compose start worker-celery` ele vai a `DONE`.
+- **Worker parado:** `docker compose stop worker-celery` (ou `worker-taskiq`), crie um job: fica `DISPATCHED` e a fila `celery` guarda a task. Depois de `docker compose start worker-celery` ele vai a `DONE`.
 
 ## 7. Limpar o estado de teste
 
 ```bash
 docker exec simple-microservices-postgres-1 psql -U app -c "TRUNCATE job_results, outbox, jobs CASCADE"
-for q in jobs.celery jobs.taskiq jobs.asyncio jobs.go celery; do
+for q in jobs.celery jobs.taskiq jobs.asyncio jobs.go celery taskiq; do
   docker exec simple-microservices-rabbitmq-1 rabbitmqctl purge_queue $q
 done
 ```
