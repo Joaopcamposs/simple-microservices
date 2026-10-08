@@ -39,11 +39,13 @@ class JobView:
 class Stack:
     """Acesso à stack em execução: gateways, RabbitMQ (management), Postgres e docker compose."""
 
-    def post_job(self, gateway: str, job_type: str) -> str:
+    def post_job(
+        self, gateway: str, job_type: str, payload: dict[str, object] | None = None
+    ) -> str:
         """Cria um job pelo gateway e devolve o `job_id` (exige 202)."""
         request = urllib.request.Request(
             f"{GATEWAYS[gateway]}/jobs",
-            json.dumps({"type": job_type, "payload": {"w": 1}}).encode(),
+            json.dumps({"type": job_type, "payload": payload or {"w": 1}}).encode(),
             {"content-type": "application/json"},
         )
         with urllib.request.urlopen(request, timeout=10) as response:

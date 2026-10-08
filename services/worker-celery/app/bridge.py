@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from app.logs import JsonFormatter
 from app.models import Envelope
 from app.tasks import process_job
+from app.workload import workload_of
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ class Bridge:
         """
         try:
             envelope = Envelope.model_validate_json(message.body)
-        except ValidationError as exc:
+            workload_of(envelope.payload)
+        except (ValidationError, ValueError) as exc:
             logger.warning("invalid message, rejected: %s", exc)
             await message.reject(requeue=False)
             return

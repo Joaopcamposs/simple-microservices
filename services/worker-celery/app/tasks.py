@@ -7,7 +7,6 @@ fila é o bridge (bridge.py).
 
 import logging
 import os
-import time
 
 from celery import Celery
 from celery.signals import setup_logging
@@ -15,6 +14,7 @@ from celery.signals import setup_logging
 from app.logs import JsonFormatter
 from app.models import Envelope, Result
 from app.store import ResultStore
+from app.workload import run_workload, workload_of
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +41,9 @@ def configure_logging(**_: object) -> None:
 
 @app.task(name="process_job")
 def process_job(envelope: dict[str, object]) -> None:
-    """Processa o job (simulado com uma espera curta) e grava o resultado."""
+    """Processa o job conforme o `workload` do payload e grava o resultado."""
     parsed = Envelope.model_validate(envelope)
-    time.sleep(0.2)
+    run_workload(workload_of(parsed.payload))
     store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
     store.save(parsed.job_id, "celery", Result(worker="celery", detail="report generated"))
     logger.info("job done", extra={"job_id": parsed.job_id})

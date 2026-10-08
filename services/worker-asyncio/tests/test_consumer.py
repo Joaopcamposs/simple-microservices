@@ -5,6 +5,7 @@ from typing import Any, cast
 from app.consumer import JobConsumer
 from app.models import Result
 from app.retry import ATTEMPT_HEADER, MAX_ATTEMPTS
+from app.workload import WORKLOADS, run_workload
 
 VALID = (
     b'{"job_id":"11111111-1111-1111-1111-111111111111","type":"http.fetch","payload":{},'
@@ -15,9 +16,9 @@ VALID = (
 class FakeMessage:
     """Mensagem entregue; registra como foi encerrada."""
 
-    def __init__(self, attempt: int = 0) -> None:
+    def __init__(self, attempt: int = 0, body: bytes = VALID) -> None:
         """Cria a mensagem com o contador de tentativas no header."""
-        self.body = VALID
+        self.body = body
         self.headers: dict[str, int] = {ATTEMPT_HEADER: attempt} if attempt else {}
         self.outcome = ""
 
@@ -94,3 +95,17 @@ async def test_success_acks_without_retry() -> None:
     message, retrier = FakeMessage(), FakeRetrier()
     await deliver(message, False, retrier)
     assert retrier.attempts == [] and message.outcome == "ack"
+
+
+async def test_unknown_workload_is_rejected() -> None:
+    """Workload fora da lista nunca vai processar: reject sem retry."""
+    body = VALID.replace(b'"payload":{}', b'"payload":{"workload":"gpu"}')
+    message, retrier = FakeMessage(body=body), FakeRetrier()
+    await deliver(message, False, retrier)
+    assert retrier.attempts == [] and message.outcome == "reject"
+
+
+async def test_each_workload_runs() -> None:
+    """As três cargas terminam sem erro (cpu e io-block bloqueiam o loop de propósito)."""
+    for workload in WORKLOADS:
+        await run_workload(workload)

@@ -6,6 +6,7 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-08
 
+- **bench:** `make bench` (`e2e/bench.py`) mede o tempo para zerar N jobs em cada worker nas cargas `io-wait`, `io-block` e `cpu`, escolhidas pelo campo opcional `workload` do `payload` (padrão `io-wait`; desconhecido é rejeitado, e os bridges também validam). Concorrência igualada em 4 no compose (`CONCURRENCY` no worker-go e no worker-asyncio, `--max-async-tasks 4` no TaskIQ). Resultado e análise em `docs/WORKERS.md`. `Makefile`: `dlq-reaper` entra em `GO_SERVICES` (faltava no `vet`).
 - **graceful shutdown (Go):** router usa `http.Server.Shutdown` (8 s) em SIGTERM/SIGINT; relay, worker-go e dlq-reaper concluem o ciclo/mensagem em voo com `context.WithoutCancel`, em vez de abortar a transação ou o `Save` no meio. Verificado: `docker compose stop` sai com código 0 em menos de 1 s.
 - **healthz (router, relay):** `GET /healthz` no router (:8080, 200 enquanto o processo vive) e no relay (:8081, ping do Postgres, 503 se falhar). O compose ganha `healthcheck` nos dois e o relay passa a depender do router `service_healthy`.
 - **retry (worker-go, worker-asyncio):** erro transitório ao gravar o resultado republica a mensagem em `jobs.retry` (header `x-attempt`); a fila `jobs.retry.<worker>` espera 5 s por TTL e devolve à fila de trabalho. Máximo 3 execuções; depois, `nack` sem requeue → DLQ → `dlq-reaper` marca `FAILED`. Falha ao republicar cai no requeue antigo. Topologia nova em `definitions.json` (recriar o broker: `make down && make up`). Bridges Celery/TaskIQ inalterados.

@@ -2,7 +2,7 @@
 
 Demo minimalista de arquitetura desacoplada. Dois gateways (Python e Go) gravam o job numa **outbox**; um **relay** entrega a um **router** (webhook) que decide qual worker processa: Celery, TaskIQ, asyncio ou goroutine. Código enxuto, só para mostrar a arquitetura.
 
-Guia de estudo (mecanismos e decisões): `docs/ESTUDO.md`. Logs, RabbitMQ e como acompanhar um job: `docs/OBSERVABILIDADE.md`. Comparação com o projeto anterior (`microservices`): `docs/COMPARACAO.md`. Spec: `docs/superpowers/specs/2026-10-07-simple-microservices-design.md`. Plano: `docs/superpowers/plans/2026-10-07-simple-microservices.md`.
+Guia de estudo (mecanismos e decisões): `docs/ESTUDO.md`. Logs, RabbitMQ e como acompanhar um job: `docs/OBSERVABILIDADE.md`. Comparação dos workers (`make bench`): `docs/WORKERS.md`. Comparação com o projeto anterior (`microservices`): `docs/COMPARACAO.md`. Spec: `docs/superpowers/specs/2026-10-07-simple-microservices-design.md`. Plano: `docs/superpowers/plans/2026-10-07-simple-microservices.md`.
 
 ---
 
@@ -81,6 +81,8 @@ Swagger: gateway-py em `http://localhost:58001/docs`; gateway-go em `http://loca
 |---|---|---|
 | `POST /jobs` | `{"type": "email.send", "payload": {}}` (`payload` opcional) | `202 {"job_id": "<uuid>"}`; `422` se `type` vazio/ausente |
 | `GET /jobs/{id}` | — | `200 {id, type, status, origin, created_at, results[]}`; `404`; `422` se o id não é uuid |
+
+O `payload` é livre; só os workers leem o campo opcional `workload` (`io-wait`, `io-block`, `cpu`), usado pelo `make bench`.
 
 Erros usam sempre `{"detail": "<texto curto>"}`: `type is required`, `invalid request body`, `invalid job id`, `job not found`. O `origin` do envelope é `gateway-py` ou `gateway-go`.
 
@@ -163,6 +165,7 @@ Qualidade e testes:
 make ruff      # lint + formato dos serviços Python
 make ty        # checagem de tipos (ty) dos serviços Python
 make e2e       # teste de ponta a ponta da stack no ar (zera o banco)
+make bench     # compara os workers por carga de trabalho (zera o banco, ~5 min)
 make vet       # go vet + gofmt dos serviços Go
 make swagger   # regenera o OpenAPI do gateway-go
 ```
@@ -179,6 +182,7 @@ simple-microservices/
 │   ├── gateway-py/  gateway-go/  relay/  router/
 │   └── worker-celery/  worker-taskiq/  worker-asyncio/  worker-go/  dlq-reaper/
 ├── e2e/e2e.py                  # `make e2e`: cenários de ponta a ponta
+├── e2e/bench.py                # `make bench`: compara os workers (docs/WORKERS.md)
 ├── contracts/envelope.schema.json
 ├── db/init.sql
 ├── infra/rabbitmq/{definitions.json,rabbitmq.conf}
@@ -235,7 +239,7 @@ Ideias que ampliam o propósito de estudo, ordenadas por valor. Nenhuma está im
 ### Alto valor, custo baixo
 
 1. **Backoff exponencial e reenvio da DLQ:** o retry atual (go e asyncio) usa atraso fixo de 5 s e máximo de 3 tentativas, e não cobre os bridges Celery/TaskIQ. Atraso crescente (uma fila de espera por degrau) e o reenvio de mensagens da `jobs.dlq` completam o ciclo de falha (hoje o `dlq-reaper` só marca `FAILED`).
-2. **Comparar os workers com trabalho real:** os quatro executam a mesma tarefa trivial. Trocar o `sleep` por I/O bloqueante e CPU, e medir o tempo até `DONE` de N jobs por worker, mostra na prática quando usar Celery, TaskIQ, asyncio ou Go.
+2. **Comparar os workers com mais realismo:** `make bench` (feito) usa cargas sintéticas. Falta I/O real (HTTP para um mock com latência), memória/CPU por processo e percentis de latência.
 
 ### Valor médio
 

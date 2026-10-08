@@ -5,7 +5,6 @@ Este módulo é o "worker do framework": o processo `taskiq worker` importa o
 essa fila é o bridge (bridge.py).
 """
 
-import asyncio
 import logging
 import os
 
@@ -15,6 +14,7 @@ from taskiq_aio_pika import AioPikaBroker
 from app.logs import JsonFormatter
 from app.models import Envelope, Result
 from app.store import ResultStore
+from app.workload import run_workload, workload_of
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,9 @@ async def configure_logging(state: TaskiqState) -> None:
 
 @broker.task(task_name="process_job")
 async def process_job(envelope: dict[str, object]) -> None:
-    """Processa o job (simulado com uma espera curta) e grava o resultado."""
+    """Processa o job conforme o `workload` do payload e grava o resultado."""
     parsed = Envelope.model_validate(envelope)
-    await asyncio.sleep(0.2)
+    await run_workload(workload_of(parsed.payload))
     store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
     await store.save(parsed.job_id, "taskiq", Result(worker="taskiq", detail="email sent"))
     logger.info("job done", extra={"job_id": parsed.job_id})

@@ -30,16 +30,26 @@ type Result struct {
 	Detail string `json:"detail"`
 }
 
-// Process executa o job. Só simula trabalho com uma espera curta, respeitando o
-// cancelamento do contexto (shutdown não fica preso esperando o sleep).
+// workloadOf lê o campo "workload" do payload. Sem o campo vale io-wait; payload
+// que não é um objeto JSON também cai no padrão (o contrato deixa o payload livre).
+func workloadOf(payload json.RawMessage) string {
+	var p struct {
+		Workload string `json:"workload"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil || p.Workload == "" {
+		return workloadIOWait
+	}
+	return p.Workload
+}
+
+// Process executa o job conforme o workload do payload (ver workload.go).
+// Workload desconhecido vira ErrUnsupportedType: repetir não adianta.
 func Process(ctx context.Context, env Envelope) (Result, error) {
 	if env.Type != "image.resize" {
 		return Result{}, ErrUnsupportedType
 	}
-	select {
-	case <-time.After(200 * time.Millisecond):
-		return Result{Worker: "go", Detail: "image resized"}, nil
-	case <-ctx.Done():
-		return Result{}, ctx.Err()
+	if err := RunWorkload(ctx, workloadOf(env.Payload)); err != nil {
+		return Result{}, err
 	}
+	return Result{Worker: "go", Detail: "image resized"}, nil
 }

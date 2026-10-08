@@ -1,7 +1,7 @@
 # Atalhos do projeto. Serviços Go e Python ficam em services/.
-GO_SERVICES := gateway-go router relay worker-go
+GO_SERVICES := gateway-go router relay worker-go dlq-reaper
 
-.PHONY: up down logs logs-jobs ruff ty e2e vet swagger
+.PHONY: up down logs logs-jobs ruff ty e2e bench vet swagger
 
 # Sobe tudo (reconstrói imagens).
 up:
@@ -37,6 +37,10 @@ ty:
 # Teste e2e da stack no ar (exige `make up`); zera jobs/outbox/resultados.
 e2e:
 	python3 e2e/e2e.py
+
+# Compara os workers (tempo para zerar N jobs por carga); exige `make up`, zera o banco e leva ~5 min.
+bench:
+	python3 e2e/bench.py
 
 # go vet + gofmt em todos os serviços Go.
 vet:

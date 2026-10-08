@@ -22,3 +22,28 @@ func TestProcessUnsupportedType(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnsupportedType", err)
 	}
 }
+
+// O workload vem do payload; sem o campo vale io-wait, e valor desconhecido é
+// rejeitado como não suportado (repetir não adianta).
+func TestProcessWorkloadSelection(t *testing.T) {
+	cases := map[string]struct {
+		payload string
+		ok      bool
+	}{
+		"default":  {`{}`, true},
+		"io-wait":  {`{"workload":"io-wait"}`, true},
+		"io-block": {`{"workload":"io-block"}`, true},
+		"cpu":      {`{"workload":"cpu"}`, true},
+		"unknown":  {`{"workload":"gpu"}`, false},
+	}
+	for name, c := range cases {
+		env := Envelope{JobID: "j1", Type: "image.resize", Payload: []byte(c.payload)}
+		_, err := Process(context.Background(), env)
+		if c.ok && err != nil {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if !c.ok && !errors.Is(err, ErrUnsupportedType) {
+			t.Errorf("%s: err = %v, want ErrUnsupportedType", name, err)
+		}
+	}
+}

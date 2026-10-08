@@ -6,6 +6,7 @@ mesmo event loop (uma thread). O prefetch limita quantas ficam em voo.
 
 import asyncio
 import logging
+import os
 from uuid import UUID
 
 from aio_pika.abc import AbstractChannel, AbstractIncomingMessage
@@ -14,12 +15,13 @@ from pydantic import ValidationError
 from app.models import Envelope, Result
 from app.retry import ATTEMPT_HEADER, MAX_ATTEMPTS, Retrier
 from app.store import ResultStore
+from app.workload import run_workload, workload_of
 
 logger = logging.getLogger(__name__)
 
 QUEUE = "jobs.asyncio"
 JOB_TYPE = "http.fetch"
-PREFETCH = 10  # limita mensagens em voo e, logo, a concorrência
+PREFETCH = int(os.environ.get("CONCURRENCY", "10"))  # mensagens em voo = concorrência
 
 
 class JobConsumer:
@@ -44,11 +46,12 @@ class JobConsumer:
         envelope = Envelope.model_validate_json(body)
         if envelope.type != JOB_TYPE:
             raise ValueError(f"unsupported job type: {envelope.type}")
+        workload_of(envelope.payload)
         return envelope
 
     async def _process(self, envelope: Envelope) -> Result:
-        """Executa o job `http.fetch` (simulado com espera curta, sem bloquear o loop)."""
-        await asyncio.sleep(0.2)
+        """Executa o job `http.fetch` conforme o `workload` do payload (ver workload.py)."""
+        await run_workload(workload_of(envelope.payload))
         return Result(worker="asyncio", detail="url fetched")
 
     async def _on_message(self, message: AbstractIncomingMessage) -> None:
