@@ -47,5 +47,5 @@ O `README.md` faz parte da entrega. Serviço criado/removido, endpoint novo, con
 ## Fluxo de trabalho
 
 - Uma etapa por vez, uma linguagem por etapa: nunca misture alterações Python e Go na mesma etapa.
-- Antes de dar uma tarefa como pronta: `make ruff` limpo (Python), `go vet` e `gofmt -l` limpos (Go) e o fluxo afetado exercitado.
+- Antes de dar uma tarefa como pronta: `make ruff` e `make ty` limpos (Python), `go vet` e `gofmt -l` limpos (Go) e o fluxo afetado exercitado.
 - Nunca faça commit ou push; essa responsabilidade é do humano.

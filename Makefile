@@ -1,7 +1,7 @@
 # Atalhos do projeto. Serviços Go e Python ficam em services/.
 GO_SERVICES := gateway-go router relay worker-go
 
-.PHONY: up down logs logs-jobs ruff vet swagger
+.PHONY: up down logs logs-jobs ruff ty vet swagger
 
 # Sobe tudo (reconstrói imagens).
 up:
@@ -27,6 +27,12 @@ logs-jobs:
 ruff:
 	uvx ruff check services
 	uvx ruff format --check services
+
+# Checagem de tipos (ty) em cada serviço Python, usando o .venv do próprio serviço.
+ty:
+	@for s in gateway-py worker-asyncio worker-celery worker-taskiq; do \
+		(cd services/$$s && uvx ty check) || exit 1; \
+	done
 
 # go vet + gofmt em todos os serviços Go.
 vet:

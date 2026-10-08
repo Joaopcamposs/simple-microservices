@@ -4,6 +4,10 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ## [Não lançado]
 
+### 2026-10-08
+
+- **tipagem (Python):** `make ty` roda o `ty` (Astral) em cada serviço Python com o `.venv` dele. Ajustes para ficar limpo: callbacks do aio-pika tipados com `AbstractIncomingMessage`, `lifespan` do gateway-py retorna `AsyncGenerator` e o teste de repositório usa DSN `str`.
+
 ### 2026-10-07
 
 - **docs:** `docs/COMPARACAO.md` compara este projeto ao `microservices` (propósito, arquitetura, robustez, observabilidade, contratos, workers, testes, tamanho) e lista o que trazer ou não do anterior.

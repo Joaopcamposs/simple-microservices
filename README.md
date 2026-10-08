@@ -157,6 +157,7 @@ Qualidade e testes:
 
 ```bash
 make ruff      # lint + formato dos serviços Python
+make ty        # checagem de tipos (ty) dos serviços Python
 make vet       # go vet + gofmt dos serviços Go
 make swagger   # regenera o OpenAPI do gateway-go
 ```

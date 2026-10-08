@@ -11,7 +11,7 @@ import logging
 import os
 
 import aio_pika
-from aio_pika import IncomingMessage
+from aio_pika.abc import AbstractIncomingMessage
 from pydantic import ValidationError
 
 from app.logs import JsonFormatter
@@ -27,7 +27,7 @@ PREFETCH = 32
 class Bridge:
     """Consome jobs.celery e repassa cada envelope ao Celery."""
 
-    async def on_message(self, message: IncomingMessage) -> None:
+    async def on_message(self, message: AbstractIncomingMessage) -> None:
         """Valida e enfileira no Celery.
 
         Inválida: reject sem requeue. Falha ao enfileirar: requeue. O ack só vem

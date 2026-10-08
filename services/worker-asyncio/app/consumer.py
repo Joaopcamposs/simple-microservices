@@ -7,8 +7,7 @@ mesmo event loop (uma thread). O prefetch limita quantas ficam em voo.
 import asyncio
 import logging
 
-from aio_pika import IncomingMessage
-from aio_pika.abc import AbstractChannel
+from aio_pika.abc import AbstractChannel, AbstractIncomingMessage
 from pydantic import ValidationError
 
 from app.models import Envelope, Result
@@ -49,7 +48,7 @@ class JobConsumer:
         await asyncio.sleep(0.2)
         return Result(worker="asyncio", detail="url fetched")
 
-    async def _on_message(self, message: IncomingMessage) -> None:
+    async def _on_message(self, message: AbstractIncomingMessage) -> None:
         """Valida, processa e grava.
 
         Inválida ou type não suportado: reject sem requeue (repetir não adianta).

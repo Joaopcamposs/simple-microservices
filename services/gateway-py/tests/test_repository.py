@@ -5,8 +5,8 @@ import pytest
 from app.models import CreateJobRequest
 from app.repository import JobRepository
 
-DSN = os.environ.get("TEST_DATABASE_URL")
-pytestmark = pytest.mark.skipif(DSN is None, reason="TEST_DATABASE_URL não definido")
+DSN = os.environ.get("TEST_DATABASE_URL", "")
+pytestmark = pytest.mark.skipif(not DSN, reason="TEST_DATABASE_URL não definido")
 
 
 @pytest.fixture
