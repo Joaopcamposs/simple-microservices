@@ -6,7 +6,8 @@ from contextlib import asynccontextmanager
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from psycopg_pool import AsyncConnectionPool
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.models import CreateJobRequest, CreateJobResponse, JobView
 from app.repository import JobRepository
@@ -18,7 +19,7 @@ ORIGIN = "gateway-py"
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Abre o pool no boot e o fecha no shutdown; o repositório fica em app.state."""
     dsn = os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app")
-    async with AsyncConnectionPool(dsn, open=False) as pool:
+    async with JobRepository.create_pool(dsn) as pool:
         await pool.open()
         app.state.repository = JobRepository(pool)
         yield
@@ -32,6 +33,18 @@ def get_repository(request: Request) -> JobRepository:
 def create_app() -> FastAPI:
     """Monta a aplicação e registra as rotas."""
     app = FastAPI(title="Gateway Py", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
+        """Responde 422 como {"detail": "<texto curto>"}, igual ao gateway-go."""
+        locations = [tuple(item["loc"]) for item in error.errors()]
+        if ("path", "job_id") in locations:
+            detail = "invalid job id"
+        elif ("body", "type") in locations:
+            detail = "type is required"
+        else:
+            detail = "invalid request body"
+        return JSONResponse(status_code=422, content={"detail": detail})
 
     @app.post(
         "/jobs",

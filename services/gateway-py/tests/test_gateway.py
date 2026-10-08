@@ -20,10 +20,32 @@ def client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
-@pytest.mark.parametrize("body", [{}, {"type": ""}, {"payload": {"a": 1}}])
-async def test_create_job_rejects_missing_type(client, body) -> None:
+@pytest.mark.parametrize(
+    ("body", "detail"),
+    [
+        ({}, "type is required"),
+        ({"type": ""}, "type is required"),
+        ({"payload": {"a": 1}}, "type is required"),
+    ],
+)
+async def test_create_job_rejects_missing_type(client, body, detail) -> None:
     response = await client.post("/jobs", json=body)
     assert response.status_code == 422
+    assert response.json() == {"detail": detail}
+
+
+async def test_create_job_rejects_invalid_json(client) -> None:
+    response = await client.post(
+        "/jobs", content="not json", headers={"content-type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid request body"}
+
+
+async def test_get_job_rejects_invalid_id(client) -> None:
+    response = await client.get("/jobs/not-a-uuid")
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid job id"}
 
 
 async def test_get_unknown_job_is_404(client) -> None:

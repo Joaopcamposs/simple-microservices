@@ -14,6 +14,15 @@ from app.models import CreateJobRequest, Envelope, JobResult, JobView
 class JobRepository:
     """Persistência de jobs e outbox sobre um pool assíncrono."""
 
+    @staticmethod
+    def create_pool(dsn: str) -> AsyncConnectionPool:
+        """Cria o pool (ainda fechado; use `await pool.open()`).
+
+        `check` descarta conexões mortas, p.ex. depois de um restart do Postgres,
+        em vez de entregá-las e estourar 500 no primeiro request.
+        """
+        return AsyncConnectionPool(dsn, open=False, check=AsyncConnectionPool.check_connection)
+
     def __init__(self, pool: AsyncConnectionPool) -> None:
         """Recebe o pool de conexões (criado no lifespan da aplicação)."""
         self._pool = pool
