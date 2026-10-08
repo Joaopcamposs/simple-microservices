@@ -1,5 +1,6 @@
 """gateway-py: API FastAPI que grava job + outbox e responde 202."""
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -9,15 +10,26 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.logs import JsonFormatter
 from app.models import CreateJobRequest, CreateJobResponse, JobView
 from app.repository import JobRepository
 
 ORIGIN = "gateway-py"
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Abre o pool no boot e o fecha no shutdown; o repositório fica em app.state."""
+    """Liga o log JSON e abre o pool no boot; fecha o pool no shutdown. Repositório em app.state."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(JsonFormatter(ORIGIN))
+    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    # Os loggers do uvicorn têm handler próprio e não propagam; sem ele, vão para o root (JSON).
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True
     dsn = os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app")
     async with JobRepository.create_pool(dsn) as pool:
         await pool.open()
@@ -58,7 +70,9 @@ def create_app() -> FastAPI:
         request: CreateJobRequest, repository: JobRepository = Depends(get_repository)
     ) -> CreateJobResponse:
         """Aceita o job; o relay/router/worker cuidam do resto."""
-        return CreateJobResponse(job_id=await repository.create(request, ORIGIN))
+        job_id = await repository.create(request, ORIGIN)
+        logger.info("job accepted", extra={"job_id": job_id})
+        return CreateJobResponse(job_id=job_id)
 
     @app.get(
         "/jobs/{job_id}",

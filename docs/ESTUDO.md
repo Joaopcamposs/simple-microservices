@@ -400,7 +400,7 @@ Cortes deliberados do projeto anterior: benchmark, OpenTelemetry/Grafana/Prometh
 
 ---
 
-## 10.1 Logs e rastreio de um job **[serviços Go e workers Python]**
+## 10.1 Logs e rastreio de um job **[todos os serviços]**
 
 > Passo a passo prático (comandos, RabbitMQ, banco, diagnóstico): `docs/OBSERVABILIDADE.md`.
 
@@ -419,7 +419,7 @@ Convenção de nível: INFO é o caminho normal; WARN é falha esperada que o si
 
 Exemplo de um job `bogus` que termina em `FAILED`: `job accepted` (gateway) → `unknown job type` (router) → `job rejected, marked failed` (relay). O motivo do `FAILED` agora está nos logs.
 
-Os workers Python (`worker-asyncio`, `worker-celery`, `worker-taskiq` e os dois bridges) usam o mesmo formato por meio de `app/logs.py` (`JsonFormatter`). O `gateway-py` ainda usa o log padrão do uvicorn, sem `job_id` estruturado.
+Os workers Python (`worker-asyncio`, `worker-celery`, `worker-taskiq` e os dois bridges) usam o mesmo formato por meio de `app/logs.py` (`JsonFormatter`). O `gateway-py` também: o `lifespan` liga o `JsonFormatter` e redireciona os loggers do uvicorn para ele (o access log vira uma linha JSON com a requisição em `msg`), e `create_job` loga `job accepted` com `job_id`.
 
 ---
 
