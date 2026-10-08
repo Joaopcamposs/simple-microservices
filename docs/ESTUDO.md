@@ -2,7 +2,7 @@
 
 Guia para quem já domina HTTP, SQL, Docker e o básico de mensageria e quer entender **por que** este projeto é montado assim e **como** as peças se integram. O `README.md` diz o que existe; este arquivo explica as decisões, os mecanismos e as armadilhas.
 
-> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router` e `relay` existem e foram verificados. Os quatro workers estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
+> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay` e `worker-go` existem e foram verificados. Os três workers Python estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
 
 ---
 
@@ -278,7 +278,7 @@ Carregar `definitions.json` **substitui** o usuário padrão do broker: sem uma 
 
 ---
 
-## 9. Workers **[planejados]**
+## 9. Workers **[worker-go implementado; demais planejados]**
 
 Os quatro executam a mesma tarefa trivial (espera curta, grava `{"worker","detail"}`), para que a **diferença esteja no modelo de execução**, não na lógica.
 
@@ -288,6 +288,25 @@ Os quatro executam a mesma tarefa trivial (espera curta, grava `{"worker","detai
 | `worker-asyncio` | `aio-pika` puro, event loop | I/O concorrente em uma thread, sem framework |
 | `worker-celery` | bridge `aio-pika` + task Celery | framework de tarefas maduro (workers por processo/pool) |
 | `worker-taskiq` | bridge `aio-pika` + task TaskIQ | framework async-first, API estilo FastAPI |
+
+### worker-go **[implementado]**
+
+Arquivos de `services/worker-go/`:
+
+| Arquivo | Papel |
+|---|---|
+| `handler.go` | `Envelope`/`Result` e `Process`: a lógica simulada de `image.resize`. Devolve `ErrUnsupportedType` para outros types |
+| `store.go` | `ResultStore.Save`: `INSERT ... ON CONFLICT DO NOTHING` em `job_results` + `jobs → DONE`, numa transação |
+| `consumer.go` | `Consumer`: `Qos(prefetch)`, `Consume` sem auto-ack, uma goroutine por `Delivery`, `WaitGroup` no shutdown |
+| `main.go` | monta pool, conexão AMQP e consumer; encerra em SIGINT/SIGTERM |
+
+Pontos para estudar:
+
+- **Prefetch é o limitador de concorrência.** `Qos(10)` faz o broker entregar no máximo 10 mensagens sem ack; como cada uma ganha uma goroutine, são no máximo 10 em paralelo. Não há worker pool explícito.
+- **Ack só depois de gravar.** `Ack` vem depois do `Save`. Se o processo morre no meio, a mensagem volta para a fila e `ON CONFLICT` absorve a repetição.
+- **Três destinos de falha.** JSON inválido ou type não suportado: `Nack` sem requeue (repetir não adianta). Erro transitório (banco): `Nack` com requeue. Sucesso: `Ack`.
+- **Limite conhecido:** o requeue de erro transitório não tem backoff, então um banco fora do ar gera loop rápido de reentrega. DLQ e retry estão fora de escopo.
+- Verificado de ponta a ponta: `POST /jobs` (`image.resize`) em cada gateway chega a `DONE` com `results[0].worker == "go"` em poucos segundos.
 
 ### O padrão bridge (Celery e TaskIQ)
 

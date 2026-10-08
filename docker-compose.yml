@@ -48,6 +48,17 @@ services:
       postgres: { condition: service_healthy }
       router: { condition: service_started }
 
+  # Consome jobs.go (image.resize) com uma goroutine por mensagem.
+  worker-go:
+    build: ./services/worker-go
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
   gateway-py:
     build: ./services/gateway-py
     restart: unless-stopped
