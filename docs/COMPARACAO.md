@@ -39,7 +39,7 @@ Diferença estrutural mais importante: o novo introduz um **hop a mais** (relay 
 | Entrega | At-least-once (outbox + confirm) | At-least-once (outbox + publisher confirms no router) |
 | Concorrência do relay | `FOR UPDATE SKIP LOCKED`, lote de 100 | `FOR UPDATE SKIP LOCKED` |
 | Idempotência | `ON CONFLICT` em `(job_id, worker)` | Idem |
-| Publicação sem destino | `mandatory=true` + `NotifyReturn`: mensagem sem fila é detectada | `mandatory=false` (verificado em `services/router/publisher.go`): mensagem sem fila é descartada pelo broker apesar do confirm |
+| Publicação sem destino | `mandatory=true` + `NotifyReturn`: mensagem sem fila é detectada | Idem (`mandatory=true` + `NotifyReturn` no router): vira `ErrUnroutable` → 502 → outbox `pending`, tenta de novo |
 | Mensagem inválida | Rejeitada para DLQ (`jobs.dlx → jobs.dlq`) | `reject`/`nack` sem requeue; **sem DLQ**, a mensagem some |
 | Retry | Campo `attempt` no envelope | Não há; falha vira `FAILED` |
 | Falha do broker | Relay reconecta com backoff | Router e worker-go saem com erro; o compose reinicia. Workers Python usam `connect_robust` |
@@ -130,7 +130,7 @@ Os dois usam o padrão bridge para Celery e TaskIQ (consumidor fino lê a fila d
 Ordem sugerida, por retorno sobre custo (ver também a seção "Melhorias futuras" do README):
 
 1. **DLQ** (`jobs.dlx → jobs.dlq`): hoje mensagem inválida some com `nack` sem requeue.
-2. **`mandatory=true` + tratamento de `Return` no router:** hoje publicar para worker sem fila confirma e perde a mensagem; o job ficaria `DISPATCHED` para sempre.
+2. ~~**`mandatory=true` + tratamento de `Return` no router**~~ feito em 2026-10-08.
 3. **`/healthz` no relay e no router**, com `depends_on: condition: service_healthy` no compose.
 4. **Teste e2e automatizado** reproduzindo o roteiro manual atual.
 5. **Retry com contador (`attempt`)** quando houver falha transitória no worker.
@@ -146,4 +146,4 @@ Ordem sugerida, por retorno sobre custo (ver também a seção "Melhorias futura
 
 Os projetos não competem: o anterior é a **medição**, o novo é a **explicação**. O novo é mais fácil de ler, mais fácil de operar e documenta melhor as decisões; o anterior é mais forte onde o sistema encontra o mundo real (broker instável, mensagem sem destino, carga alta, necessidade de medir).
 
-A maior fraqueza do novo é a ausência de DLQ e de `mandatory` no router: são os dois pontos em que uma mensagem pode se perder sem aparecer em nenhum estado. A maior fraqueza do anterior para estudo é o volume: o mecanismo essencial (outbox → broker → worker idempotente) fica diluído entre benchmark, observabilidade e workloads.
+A maior fraqueza do novo é a ausência de DLQ: mensagem inválida é descartada sem aparecer em nenhum estado. A maior fraqueza do anterior para estudo é o volume: o mecanismo essencial (outbox → broker → worker idempotente) fica diluído entre benchmark, observabilidade e workloads.

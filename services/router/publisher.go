@@ -13,6 +13,10 @@ import (
 // O router só publica nele; a topologia (filas e bindings) já existe no broker.
 const exchangeName = "jobs"
 
+// ErrUnroutable indica que o broker confirmou a mensagem mas nenhuma fila a
+// recebeu (binding ou fila ausente). Sem mandatory ela seria descartada em silêncio.
+var ErrUnroutable = errors.New("message unroutable")
+
 // AMQPPublisher publica no RabbitMQ com publisher confirms: só devolve sucesso
 // depois que o broker confirmou ter recebido a mensagem. Sem isso, um 202 do
 // router poderia mentir e o job se perderia.
@@ -24,6 +28,8 @@ type AMQPPublisher struct {
 	conn   *amqp.Connection
 	ch     *amqp.Channel
 	closed chan *amqp.Error
+	// returns recebe as mensagens devolvidas pelo broker (mandatory sem rota).
+	returns chan amqp.Return
 }
 
 // NewAMQPPublisher conecta ao broker e liga o modo de confirmação.
@@ -43,16 +49,18 @@ func NewAMQPPublisher(url string) (*AMQPPublisher, error) {
 		return nil, fmt.Errorf("enable confirms: %w", err)
 	}
 	closed := conn.NotifyClose(make(chan *amqp.Error, 1))
-	return &AMQPPublisher{conn: conn, ch: ch, closed: closed}, nil
+	returns := ch.NotifyReturn(make(chan amqp.Return, 1))
+	return &AMQPPublisher{conn: conn, ch: ch, closed: closed, returns: returns}, nil
 }
 
 // Publish envia o corpo ao exchange com routing key = worker e espera o confirm.
 // A mensagem é persistente (sobrevive a restart do broker, pois as filas são
-// duráveis). mandatory=false: a topologia é fixa, então não tratamos devoluções.
+// duráveis). mandatory=true: sem fila de destino o broker devolve a mensagem
+// (basic.return) antes do ack, e isso vira ErrUnroutable em vez de perda silenciosa.
 func (p *AMQPPublisher) Publish(ctx context.Context, worker Worker, body []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	conf, err := p.ch.PublishWithDeferredConfirmWithContext(ctx, exchangeName, string(worker), false, false, amqp.Publishing{
+	conf, err := p.ch.PublishWithDeferredConfirmWithContext(ctx, exchangeName, string(worker), true, false, amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
 		Body:         body,
@@ -67,7 +75,13 @@ func (p *AMQPPublisher) Publish(ctx context.Context, worker Worker, body []byte)
 	if !acked {
 		return errors.New("broker nack")
 	}
-	return nil
+	// O return chega antes do ack no mesmo canal, então já está no buffer.
+	select {
+	case ret := <-p.returns:
+		return fmt.Errorf("%w: %s (%d)", ErrUnroutable, ret.ReplyText, ret.ReplyCode)
+	default:
+		return nil
+	}
 }
 
 // Closed devolve um canal que recebe o erro quando o broker derruba a conexão

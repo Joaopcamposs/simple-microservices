@@ -250,7 +250,7 @@ docker exec simple-microservices-router-1 wget -qO- --post-data='{"job_id":"x","
 
 Detalhes de implementação:
 
-- **Publisher confirms** (`ch.Confirm` + `PublishWithDeferredConfirmWithContext`): o router só responde 202 depois que o broker confirmou que persistiu a mensagem. Sem confirm, um 202 poderia mentir.
+- **Publisher confirms** (`ch.Confirm` + `PublishWithDeferredConfirmWithContext`): o router só responde 202 depois que o broker confirmou que persistiu a mensagem. Sem confirm, um 202 poderia mentir. Com `mandatory=true` + `NotifyReturn`, publicar numa routing key sem fila bound também falha (`ErrUnroutable`, 502): o broker confirma mesmo descartando, mas o `basic.return` chega antes do ack, e o relay mantém a outbox `pending` até a topologia voltar.
 - **`DeliveryMode: Persistent`** + fila durável: a mensagem sobrevive a restart do broker.
 - **Mutex no publish:** o `amqp.Channel` não é seguro para uso concorrente, e o handler HTTP roda uma goroutine por request.
 - **Interface `Publisher`** injetada no handler: o teste usa um fake e valida roteamento e status sem broker.

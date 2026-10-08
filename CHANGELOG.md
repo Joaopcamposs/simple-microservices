@@ -6,6 +6,7 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-08
 
+- **router (fix):** publica com `mandatory=true` e trata `basic.return` (`ErrUnroutable`). Antes, routing key sem fila bound era confirmada e descartada, deixando o job `DISPATCHED` para sempre; agora responde 502 e o relay tenta de novo. Teste de integração opcional (`TEST_AMQP_URL`).
 - **tipagem (Python):** `make ty` roda o `ty` (Astral) em cada serviço Python com o `.venv` dele. Ajustes para ficar limpo: callbacks do aio-pika tipados com `AbstractIncomingMessage`, `lifespan` do gateway-py retorna `AsyncGenerator` e o teste de repositório usa DSN `str`.
 
 ### 2026-10-07
