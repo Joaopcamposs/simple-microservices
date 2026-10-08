@@ -2,7 +2,7 @@
 // numa goroutine. Mostra o modelo de concorrência nativo do Go (compare com o
 // asyncio e com os bridges Celery/TaskIQ, em Python).
 //
-// handler.go contém o envelope do contrato e a lógica (simulada) do job.
+// handler.go contém o envelope do contrato e o job; resize.go, a redução da imagem.
 package main
 
 import (
@@ -30,26 +30,15 @@ type Result struct {
 	Detail string `json:"detail"`
 }
 
-// workloadOf lê o campo "workload" do payload. Sem o campo vale io-wait; payload
-// que não é um objeto JSON também cai no padrão (o contrato deixa o payload livre).
-func workloadOf(payload json.RawMessage) string {
-	var p struct {
-		Workload string `json:"workload"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil || p.Workload == "" {
-		return workloadIOWait
-	}
-	return p.Workload
-}
-
-// Process executa o job conforme o workload do payload (ver workload.go).
-// Workload desconhecido vira ErrUnsupportedType: repetir não adianta.
+// Process executa o job: gera a imagem de origem e a reduz a um thumbnail.
+// Só checa o cancelamento antes de começar; a redução dura dezenas de ms.
 func Process(ctx context.Context, env Envelope) (Result, error) {
 	if env.Type != "image.resize" {
 		return Result{}, ErrUnsupportedType
 	}
-	if err := RunWorkload(ctx, workloadOf(env.Payload)); err != nil {
+	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	Resize(NewGradient(sourceSize), targetSize)
 	return Result{Worker: "go", Detail: "image resized"}, nil
 }

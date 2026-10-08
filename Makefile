@@ -38,7 +38,7 @@ ty:
 e2e:
 	python3 e2e/e2e.py
 
-# Compara os workers (tempo para zerar N jobs por carga); exige `make up`, zera o banco e leva ~5 min.
+# Tempo em carga de cada worker (N jobs por worker); exige `make up`, zera o banco.
 bench:
 	python3 e2e/bench.py
 

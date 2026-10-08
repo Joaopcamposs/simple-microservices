@@ -69,9 +69,9 @@ def deliver(body: bytes) -> FakeMessage:
     return message
 
 
-def test_unknown_workload_is_rejected_and_not_enqueued(task: FakeTask) -> None:
-    """Workload inválido não vai ao Celery: o job ficaria preso se fosse confirmado."""
-    message = deliver(BODY.replace(b'"payload":{}', b'"payload":{"workload":"gpu"}'))
+def test_invalid_envelope_is_rejected_and_not_enqueued(task: FakeTask) -> None:
+    """Envelope inválido não vai ao framework: o job ficaria preso se fosse confirmado."""
+    message = deliver(b'{"type": 1}')
     assert message.outcome == "reject" and task.sent == []
 
 

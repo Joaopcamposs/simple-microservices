@@ -5,8 +5,10 @@ consome a fila interna `celery` e executa `process_job`. Quem alimenta essa
 fila é o bridge (bridge.py).
 """
 
+import hashlib
 import logging
 import os
+from uuid import UUID
 
 from celery import Celery
 from celery.signals import setup_logging
@@ -14,7 +16,6 @@ from celery.signals import setup_logging
 from app.logs import JsonFormatter
 from app.models import Envelope, Result
 from app.store import ResultStore
-from app.workload import run_workload, workload_of
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,23 @@ def configure_logging(**_: object) -> None:
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 
 
+SIGN_ITERATIONS = 600_000  # PBKDF2-SHA256: cerca de 100 ms de CPU
+
+
+def generate_report(job_id: UUID) -> str:
+    """Simula a geração do relatório assinando-o com PBKDF2; devolve a assinatura em hex.
+
+    CPU pura e síncrona: cabe ao Celery prefork, onde cada job ocupa um processo
+    com o seu GIL e vários núcleos trabalham ao mesmo tempo.
+    """
+    return hashlib.pbkdf2_hmac("sha256", str(job_id).encode(), b"report", SIGN_ITERATIONS).hex()
+
+
 @app.task(name="process_job")
 def process_job(envelope: dict[str, object]) -> None:
-    """Processa o job conforme o `workload` do payload e grava o resultado."""
+    """Gera o relatório e grava o resultado."""
     parsed = Envelope.model_validate(envelope)
-    run_workload(workload_of(parsed.payload))
+    generate_report(parsed.job_id)
     store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
     store.save(parsed.job_id, "celery", Result(worker="celery", detail="report generated"))
     logger.info("job done", extra={"job_id": parsed.job_id})

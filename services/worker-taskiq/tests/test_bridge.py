@@ -68,9 +68,9 @@ async def deliver(body: bytes) -> FakeMessage:
     return message
 
 
-async def test_unknown_workload_is_rejected_and_not_enqueued(task: FakeTask) -> None:
-    """Workload inválido não vai ao TaskIQ: o job ficaria preso se fosse confirmado."""
-    message = await deliver(BODY.replace(b'"payload":{}', b'"payload":{"workload":"gpu"}'))
+async def test_invalid_envelope_is_rejected_and_not_enqueued(task: FakeTask) -> None:
+    """Envelope inválido não vai ao framework: o job ficaria preso se fosse confirmado."""
+    message = await deliver(b'{"type": 1}')
     assert message.outcome == "reject" and task.sent == []
 
 

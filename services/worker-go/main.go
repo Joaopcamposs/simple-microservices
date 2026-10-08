@@ -5,16 +5,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// defaultConcurrency é o máximo de mensagens (e goroutines) em processamento ao
-// mesmo tempo; CONCURRENCY sobrescreve (o bench iguala a concorrência dos workers).
-const defaultConcurrency = 10
+// prefetch é o máximo de mensagens (e goroutines) em processamento ao mesmo tempo.
+const prefetch = 10
 
 // env lê uma variável de ambiente com valor padrão.
 func env(key, fallback string) string {
@@ -56,11 +54,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	prefetch, err := strconv.Atoi(env("CONCURRENCY", strconv.Itoa(defaultConcurrency)))
-	if err != nil {
-		return err
-	}
-	slog.Info("consuming", "queue", "jobs.go", "concurrency", prefetch)
+	slog.Info("consuming", "queue", "jobs.go")
 	return NewConsumer(ch, "jobs.go", prefetch, NewResultStore(pool), retrier).Run(ctx)
 }
 

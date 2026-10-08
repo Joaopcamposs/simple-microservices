@@ -65,7 +65,6 @@ services:
     build: ./services/worker-go
     restart: unless-stopped
     environment:
-      CONCURRENCY: "4"
       DATABASE_URL: postgres://app:app@postgres:5432/app
       AMQP_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
@@ -88,7 +87,6 @@ services:
     build: ./services/worker-asyncio
     restart: unless-stopped
     environment:
-      CONCURRENCY: "4"
       DATABASE_URL: postgres://app:app@postgres:5432/app
       AMQP_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
@@ -132,7 +130,7 @@ services:
   # Executa a task TaskIQ (async, 1 processo) alimentada pelo bridge.
   worker-taskiq:
     build: ./services/worker-taskiq
-    command: taskiq worker app.tasks:broker --workers 1 --max-async-tasks 4
+    command: taskiq worker app.tasks:broker --workers 1
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app

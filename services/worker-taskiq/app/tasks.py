@@ -5,6 +5,7 @@ Este módulo é o "worker do framework": o processo `taskiq worker` importa o
 essa fila é o bridge (bridge.py).
 """
 
+import asyncio
 import logging
 import os
 
@@ -14,7 +15,6 @@ from taskiq_aio_pika import AioPikaBroker
 from app.logs import JsonFormatter
 from app.models import Envelope, Result
 from app.store import ResultStore
-from app.workload import run_workload, workload_of
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,23 @@ async def configure_logging(state: TaskiqState) -> None:
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 
 
+SMTP_LATENCY = 0.2  # segundos de ida e volta ao servidor de e-mail
+
+
+async def send_email() -> None:
+    """Simula o envio: a espera pelo servidor SMTP cede o loop (`await`) aos outros jobs.
+
+    I/O que espera é o caso ideal do TaskIQ: um processo e um event loop atendem
+    muitos envios ao mesmo tempo.
+    """
+    await asyncio.sleep(SMTP_LATENCY)
+
+
 @broker.task(task_name="process_job")
 async def process_job(envelope: dict[str, object]) -> None:
-    """Processa o job conforme o `workload` do payload e grava o resultado."""
+    """Envia o e-mail e grava o resultado."""
     parsed = Envelope.model_validate(envelope)
-    await run_workload(workload_of(parsed.payload))
+    await send_email()
     store = ResultStore(os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app"))
     await store.save(parsed.job_id, "taskiq", Result(worker="taskiq", detail="email sent"))
     logger.info("job done", extra={"job_id": parsed.job_id})

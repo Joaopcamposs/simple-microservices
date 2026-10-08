@@ -280,7 +280,7 @@ Carregar `definitions.json` **substitui** o usuário padrão do broker: sem uma 
 
 ## 9. Workers **[implementados: go, asyncio, celery, taskiq]**
 
-Os quatro executam a mesma tarefa trivial (espera curta, grava `{"worker","detail"}`), para que a **diferença esteja no modelo de execução**, não na lógica.
+Os quatro gravam o mesmo `{"worker","detail"}` e falam o mesmo contrato, para que a **diferença esteja no modelo de execução**. O trabalho simulado de cada um é o que combina com esse modelo: CPU em `go` e `celery` (vários núcleos), espera de I/O com `await` em `asyncio` e `taskiq` (um loop).
 
 | Worker | Modelo | O que mostra |
 |---|---|---|
@@ -295,7 +295,7 @@ Arquivos de `services/worker-go/`:
 
 | Arquivo | Papel |
 |---|---|
-| `handler.go` | `Envelope`/`Result` e `Process`: a lógica simulada de `image.resize`. Devolve `ErrUnsupportedType` para outros types |
+| `handler.go` | `Envelope`/`Result` e `Process`: o job `image.resize`; `resize.go` faz a redução da imagem (filtro de caixa, só stdlib). Devolve `ErrUnsupportedType` para outros types |
 | `store.go` | `ResultStore.Save`: `INSERT ... ON CONFLICT DO NOTHING` em `job_results` + `jobs → DONE`, numa transação |
 | `consumer.go` | `Consumer`: `Qos(prefetch)`, `Consume` sem auto-ack, uma goroutine por `Delivery`, `WaitGroup` no shutdown |
 | `main.go` | monta pool, conexão AMQP e consumer; encerra em SIGINT/SIGTERM |
@@ -344,7 +344,7 @@ Dois containers, mesma imagem (`services/worker-celery`), processos diferentes e
 | Arquivo | Papel |
 |---|---|
 | `app/bridge.py` | classe `Bridge`: consome `jobs.celery` com aio-pika, valida o envelope e chama `process_job.delay(...)` numa thread (`asyncio.to_thread`, porque o `delay` bloqueia). Ack só depois do `delay`; inválida: `reject` sem requeue |
-| `app/tasks.py` | app Celery e a task `process_job`: espera 0,2 s, grava o resultado e loga `job done` |
+| `app/tasks.py` | app Celery e a task `process_job`: `generate_report` (PBKDF2, CPU), grava o resultado e loga `job done` |
 | `app/store.py` | `ResultStore` **síncrono** (`psycopg.connect`): o Celery roda tasks em processos filhos, sem event loop |
 | `app/logs.py`, `app/models.py` | mesmo log JSON e mesmos modelos do worker-asyncio |
 
@@ -363,7 +363,7 @@ Mesmo desenho do celery (bridge + worker, uma imagem, `command` do compose escol
 | Arquivo | Papel |
 |---|---|
 | `app/bridge.py` | classe `Bridge`: consome `jobs.taskiq`, valida e faz `await process_job.kiq(...)`; ack só depois do `kiq`. Chama `broker.startup()` antes de consumir |
-| `app/tasks.py` | `AioPikaBroker` e a task `async def process_job`: espera 0,2 s, grava o resultado e loga `job done` |
+| `app/tasks.py` | `AioPikaBroker` e a task `async def process_job`: `send_email` (`await` da latência SMTP), grava o resultado e loga `job done` |
 | `app/store.py` | o mesmo `ResultStore` assíncrono do worker-asyncio |
 
 Diferenças em relação ao Celery, boas para comparar:
@@ -493,7 +493,31 @@ O projeto usa os dois de propósito, mas a divisão não é sorteio. Cada escolh
 
 ### Aviso honesto sobre este projeto
 
-Aqui os handlers dos workers só dormem um instante e gravam resultado, e não há benchmark (está fora de escopo). **Nada neste repositório prova que um é mais rápido.** Os números de memória e throughput que se ouvem por aí dependem de carga real. O que o projeto mostra é a **forma** de cada stack: como cada uma estrutura concorrência, validação, ack e testes. Use-o para comparar o código, não para escolher por desempenho.
+Os jobs são simulados (`make bench` mede cada worker no seu próprio job, em máquina local, 100 jobs por rodada, mediana de 3). Os tempos não são comparáveis entre workers, porque as tarefas diferem, nem preveem produção: servem para ver cada modelo fazendo o que faz bem. Meça com a sua carga antes de escolher por desempenho.
+
+### Por que o worker asyncio e o TaskIQ pedem cuidado com código bloqueante
+
+**Causa: um event loop numa thread só.** A concorrência do asyncio é cooperativa: as tasks em voo avançam juntas apenas enquanto cada uma devolve o controle ao loop com `await`. Um `time.sleep` ou um cálculo chamado direto na corrotina não devolve nada, então o loop para e os outros jobs esperam. Isto não é o GIL: só existe uma thread, e mesmo sem GIL (Python free-threaded) o comportamento seria o mesmo.
+
+| Worker | Unidade de paralelismo | Bloquear dentro do job | CPU |
+|---|---|---|---|
+| asyncio, TaskIQ | 1 thread + 1 event loop | trava todos os jobs | 1 núcleo |
+| Celery (prefork) | N processos, cada um com seu GIL | trava só 1 processo | N núcleos |
+| Go | goroutines em N threads do SO, sem GIL | só estaciona 1 goroutine | todos os núcleos |
+
+**Não é falha de arquitetura.** É o padrão do asyncio (e de qualquer loop de uma thread, como o Node.js): em troca, sustenta milhares de esperas simultâneas com pouca memória. O contrato do modelo é que ninguém bloqueia o loop. E a arquitetura já tem a saída: o router escolhe o worker por `type`, então um job de CPU ou de biblioteca síncrona pertence ao Go ou ao Celery.
+
+**Como contornar, da melhor para a pior opção quando o job bloqueia o loop:**
+
+1. **Usar a versão assíncrona** da biblioteca (`httpx.AsyncClient` no lugar de `requests`, `psycopg` async, `aiofiles`). Não custa thread nem processo.
+2. **`asyncio.to_thread(func, ...)`** para I/O síncrono sem equivalente async. O loop fica livre e a espera solta o GIL. O limite é o pool de threads (`min(32, cpu+4)` por padrão).
+3. **CPU que solta o GIL** (hash, zlib, NumPy): `to_thread` também funciona, porque o código C roda sem o GIL. CPU em **Python puro** não escala com threads com GIL ligado; use `ProcessPoolExecutor` (o preço é serializar argumentos e pagar memória por processo) ou Python free-threaded.
+4. **Mais processos no TaskIQ:** `--workers N` sobe N processos, cada um com seu loop. Escala CPU e bloqueio, ao custo de memória e conexões; cada processo continua com a regra do loop único.
+5. **Separar por perfil:** I/O não bloqueante em asyncio/TaskIQ, CPU e código bloqueante em Celery ou Go, ligados pela tabela do router. Não custa código.
+
+Este projeto não implementa nenhuma dessas saídas: os jobs do `asyncio` e do `taskiq` já usam `await asyncio.sleep`, a versão certa para um worker asyncio.
+
+**Regra prática:** em asyncio/TaskIQ, cada `await` é uma permissão para o loop atender os outros. Tudo que demora e não tem `await` (chamada síncrona, laço, `.result()`, `time.sleep`) tira essa permissão de todos.
 
 ---
 
