@@ -62,6 +62,7 @@ Management em `http://localhost:55673` (guest/guest).
 - **Queues → `jobs.celery`, `jobs.taskiq`, `jobs.asyncio`, `jobs.go`:** *Ready* é o que ninguém pegou ainda; *Unacked* é o que um consumer pegou e não confirmou. No fluxo normal cada mensagem passa por 1 e volta a 0 em milissegundos.
 - **Queues → `celery`:** fila interna do framework. *Ready* > 0 com job `DISPATCHED` indica worker Celery parado.
 - **Exchanges → `jobs`:** bindings das quatro filas (routing key = nome do worker).
+- **Queues → `jobs.dlq`:** mensagens rejeitadas pelos workers (JSON inválido, `type` não suportado). *Get messages* mostra o corpo e o header `x-death` (fila de origem e motivo). Se o contador cresce, há mensagem morta; o job correspondente fica `DISPATCHED`. Limpar: `rabbitmqctl purge_queue jobs.dlq`.
 - **Get messages:** espia o conteúdo sem consumir, com *Ack mode* "Nack message requeue true".
 
 Pelo terminal:

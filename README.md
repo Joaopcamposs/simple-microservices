@@ -13,7 +13,7 @@ Guia de estudo (mecanismos e decisões): `docs/ESTUDO.md`. Logs, RabbitMQ e como
 - Garantir entrega com transactional outbox (at-least-once) e workers idempotentes.
 - Manter o código pequeno e legível.
 
-**Fora de escopo:** benchmark, OpenTelemetry/Grafana/Prometheus, fanout, DLQ, retry, schema por tipo de job, autenticação, CI/CD, Kubernetes.
+**Fora de escopo:** benchmark, OpenTelemetry/Grafana/Prometheus, fanout, retry, schema por tipo de job, autenticação, CI/CD, Kubernetes.
 
 ---
 
@@ -124,14 +124,14 @@ Relay: em sucesso (2xx) marca outbox `sent` e job `DISPATCHED` (só se ainda `PE
 
 ## 6. RabbitMQ (`infra/rabbitmq/definitions.json`)
 
-Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.asyncio`, `jobs.go`, com routing key igual ao nome do worker. Carregado no boot do broker; nenhum serviço declara topologia. O mesmo arquivo cria o usuário `guest`/`guest` (as definitions substituem o usuário padrão) e `rabbitmq.conf` libera `guest` fora do loopback; só para demo. Celery e TaskIQ criam as filas internas dos próprios frameworks (`celery` e `taskiq`).
+Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.asyncio`, `jobs.go`, com routing key igual ao nome do worker. Cada fila tem `x-dead-letter-exchange: jobs.dlx` (fanout) ligado à fila `jobs.dlq`. Carregado no boot do broker; nenhum serviço declara topologia. O mesmo arquivo cria o usuário `guest`/`guest` (as definitions substituem o usuário padrão) e `rabbitmq.conf` libera `guest` fora do loopback; só para demo. Celery e TaskIQ criam as filas internas dos próprios frameworks (`celery` e `taskiq`).
 
 ## 7. Garantias e limites
 
 - **At-least-once:** o relay pode reenviar se cair entre o 2xx e o `UPDATE`.
 - **Idempotência:** resultado gravado por `(job_id, worker)` com `ON CONFLICT DO NOTHING`; o mesmo `job_id` duas vezes não duplica.
 - **Ack:** worker só confirma a mensagem depois de gravar o resultado. Nos bridges, o ack vem depois de entregar a task ao broker do framework, que reconhece tarde (`acks_late` no Celery).
-- **Mensagem inválida:** `reject`/`nack` sem requeue e log. Não há DLQ nem retry com backoff.
+- **Mensagem inválida:** `reject`/`nack` sem requeue e log; o broker move a mensagem para `jobs.dlq` (motivo no header `x-death`), onde fica para inspeção. O job continua `DISPATCHED` (nada o marca `FAILED`) e não há retry com backoff.
 - **Limites conscientes:** router e worker-go não reconectam sozinhos: ao perder o broker saem com erro e o compose os reinicia; a transação do relay fica aberta durante o POST.
 
 ---
@@ -229,7 +229,7 @@ Ideias que ampliam o propósito de estudo, ordenadas por valor. Nenhuma está im
 ### Alto valor, custo baixo
 
 1. **Teste e2e versionado (`make e2e`):** os 8 jobs (2 gateways × 4 types), o `type` desconhecido em `FAILED` e o router parado sem derrubar o `POST`. Hoje essa verificação é manual (Fases, item 11); virar script protege a arquitetura contra regressão.
-2. **Retry com backoff e DLQ:** erro transitório faz requeue imediato e mensagem inválida é descartada. Uma fila `jobs.dlq` no `definitions.json` e um contador de tentativas completam o ciclo de falha.
+2. **Retry com backoff e fechar o ciclo da DLQ:** erro transitório faz requeue imediato, e a `jobs.dlq` só guarda a mensagem inválida: nada a reenvia nem marca o job `FAILED`. Um contador de tentativas e um consumidor da DLQ completam o ciclo de falha.
 3. **Comparar os workers com trabalho real:** os quatro executam a mesma tarefa trivial. Trocar o `sleep` por I/O bloqueante e CPU, e medir o tempo até `DONE` de N jobs por worker, mostra na prática quando usar Celery, TaskIQ, asyncio ou Go.
 
 ### Valor médio

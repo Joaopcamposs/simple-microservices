@@ -262,7 +262,7 @@ Detalhes de implementação:
 
 ### Topologia
 
-Declarada **uma vez**, em `infra/rabbitmq/definitions.json`, carregada no boot do broker (`load_definitions` no `rabbitmq.conf`): exchange `jobs` (tipo **direct**), quatro filas duráveis e quatro bindings com routing key igual ao nome do worker. Nenhum serviço declara filas, então não há divergência de argumentos entre produtor e consumidor (o erro `PRECONDITION_FAILED` clássico).
+Declarada **uma vez**, em `infra/rabbitmq/definitions.json`, carregada no boot do broker (`load_definitions` no `rabbitmq.conf`): exchange `jobs` (tipo **direct**), quatro filas duráveis e quatro bindings com routing key igual ao nome do worker, mais a exchange `jobs.dlx` (fanout) e a fila `jobs.dlq` para mensagens mortas. Nenhum serviço declara filas, então não há divergência de argumentos entre produtor e consumidor (o erro `PRECONDITION_FAILED` clássico).
 
 Direct exchange basta porque o roteamento já foi decidido pelo router: a routing key *é* o destino. Topic ou fanout seriam mecanismo sem uso.
 
@@ -273,7 +273,7 @@ Carregar `definitions.json` **substitui** o usuário padrão do broker: sem uma 
 ### Ack, nack e garantias
 
 - Consumidores usam **ack manual**: só confirmam depois de gravar o resultado. Se o worker morre no meio, a mensagem volta à fila.
-- Mensagem inválida (JSON quebrado, campo faltando): `reject`/`nack` **sem requeue** e log. Reenfileirar uma mensagem que nunca vai parsear criaria loop infinito. Não há DLQ nesta versão, então ela é descartada.
+- Mensagem inválida (JSON quebrado, campo faltando): `reject`/`nack` **sem requeue** e log. Reenfileirar uma mensagem que nunca vai parsear criaria loop infinito. As filas têm `x-dead-letter-exchange: jobs.dlx`, então o broker entrega a mensagem rejeitada em `jobs.dlq` (header `x-death` guarda fila de origem e motivo). Os workers não mudam: o `reject` que já faziam dispara a DLQ. O job fica `DISPATCHED`, pois nada consome a DLQ. Argumentos de fila não mudam depois de criada: mudar a topologia exige `make down` (recria o broker).
 - `prefetch` limita quantas mensagens um consumidor mantém sem ack; é também o limite de concorrência do worker Go (uma goroutine por mensagem).
 
 ---
@@ -305,7 +305,7 @@ Pontos para estudar:
 - **Prefetch é o limitador de concorrência.** `Qos(10)` faz o broker entregar no máximo 10 mensagens sem ack; como cada uma ganha uma goroutine, são no máximo 10 em paralelo. Não há worker pool explícito.
 - **Ack só depois de gravar.** `Ack` vem depois do `Save`. Se o processo morre no meio, a mensagem volta para a fila e `ON CONFLICT` absorve a repetição.
 - **Três destinos de falha.** JSON inválido ou type não suportado: `Nack` sem requeue (repetir não adianta). Erro transitório (banco): `Nack` com requeue. Sucesso: `Ack`.
-- **Limite conhecido:** o requeue de erro transitório não tem backoff, então um banco fora do ar gera loop rápido de reentrega. DLQ e retry estão fora de escopo.
+- **Limite conhecido:** o requeue de erro transitório não tem backoff, então um banco fora do ar gera loop rápido de reentrega. Retry com backoff está fora de escopo.
 - Verificado de ponta a ponta: `POST /jobs` (`image.resize`) em cada gateway chega a `DONE` com `results[0].worker == "go"` em poucos segundos.
 
 ### worker-asyncio **[implementado]**
@@ -396,7 +396,7 @@ A segunda execução não duplica nem falha. O ack vem **depois** desse insert. 
 | Efeito único | `ON CONFLICT DO NOTHING` | só protege o resultado gravado, não efeitos externos |
 | Isolamento de falha | gateway independe de broker/router | job fica `pending` até voltarem |
 
-Cortes deliberados do projeto anterior: benchmark, OpenTelemetry/Grafana/Prometheus, fanout, DLQ, retry com backoff, schema por tipo de job, autenticação, CI/CD. Cada um é um bom exercício de extensão (veja a seção 12).
+Cortes deliberados do projeto anterior: benchmark, OpenTelemetry/Grafana/Prometheus, fanout, retry com backoff, schema por tipo de job, autenticação, CI/CD. Cada um é um bom exercício de extensão (veja a seção 12).
 
 ---
 
@@ -446,7 +446,7 @@ As regras do `AGENTS.md` não são estilo, são o que mantém as fronteiras:
 
 ### Extensões para praticar
 
-- Retry com backoff e DLQ (comece pelo `x-dead-letter-exchange` nas filas).
+- Retry com backoff e consumidor da `jobs.dlq` (reenvio ou marcar o job `FAILED`).
 - Lease/`in_flight` na outbox para não segurar transação durante o POST do relay.
 - Reconexão automática do router e dos workers.
 - `traceparent` no envelope e OpenTelemetry ponta a ponta.
