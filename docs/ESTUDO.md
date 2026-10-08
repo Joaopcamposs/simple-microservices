@@ -2,7 +2,7 @@
 
 Guia para quem já domina HTTP, SQL, Docker e o básico de mensageria e quer entender **por que** este projeto é montado assim e **como** as peças se integram. O `README.md` diz o que existe; este arquivo explica as decisões, os mecanismos e as armadilhas.
 
-> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go` e `router` existem e foram verificados. `relay` e os quatro workers estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
+> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router` e `relay` existem e foram verificados. Os quatro workers estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
 
 ---
 
@@ -138,7 +138,7 @@ Para mostrar que o contrato (envelope + tabelas), e não a linguagem, é a front
 
 ---
 
-## 6. Relay **[planejado]**
+## 6. Relay **[implementado]**
 
 ### Relay e router: quem faz o quê
 
@@ -182,7 +182,17 @@ Dava, e em muitos sistemas reais é um só (o "outbox relay" publica direto no b
 
 **Quando eu unificaria:** um único produtor (a outbox), um único broker, time pequeno e sem previsão de trocar o broker. **Quando manteria separado:** vários produtores, roteamento que muda com frequência, ou necessidade de escalar a publicação sem multiplicar leitores da outbox. Neste projeto a separação é uma escolha didática, não uma necessidade técnica.
 
-Processo Go que drena a outbox. Um ciclo (`RunOnce`):
+Processo Go que drena a outbox. Arquivos de `services/relay/`:
+
+| Arquivo | Papel |
+|---|---|
+| `dispatcher.go` | `Dispatcher.Send`: POST ao router e tradução do status HTTP em `Outcome` (`Delivered`, `Rejected`, `Retry`) |
+| `relay.go` | `Relay`: `Run` (loop com ticker), `RunOnce` (um ciclo/transação), `claim` (SELECT ... SKIP LOCKED) e `mark` (UPDATE outbox + jobs) |
+| `main.go` | lê `DATABASE_URL`, `ROUTER_URL`, `POLL_INTERVAL`; encerra limpo em SIGINT/SIGTERM |
+
+`Sender` é a interface que o `Relay` usa; o teste injeta um fake e exercita o banco real sem router. Verificado de ponta a ponta: com o router parado o job fica `PENDING`; ao voltar, vira `DISPATCHED`; `type` desconhecido vira `FAILED`.
+
+Um ciclo (`RunOnce`):
 
 1. Abre transação e seleciona linhas `pending` com `FOR UPDATE SKIP LOCKED`.
 2. Para cada uma, `POST` do envelope ao router.

@@ -6,6 +6,7 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-07
 
+- **relay (Go):** drena a outbox (`FOR UPDATE SKIP LOCKED`), faz POST ao router e marca `sent`/`failed` pelo status; 5xx ou router fora mantém `pending`. `DISPATCHED` nunca sobrescreve `DONE`. Entra no compose e no `make vet`.
 - **router (Go):** webhook `POST /dispatch` que roteia por `type` (tabela fixa) e publica no exchange `jobs` com publisher confirms. Respostas 202/400/422/502. Entra no compose (porta interna 8080) e no `make vet`.
 - **docs:** `docs/ESTUDO.md`, guia de estudo da arquitetura e da stack (mecanismos, decisões, armadilhas encontradas, roteiro de prática).
 - **gateway-py:** erros 422 no formato `{"detail": "<texto curto>"}`, igual ao gateway-go. Corrigido 500 no primeiro request depois de restart do Postgres: o pool agora descarta conexões mortas (`check_connection`).

@@ -36,6 +36,18 @@ services:
     depends_on:
       rabbitmq: { condition: service_healthy }
 
+  # Drena a outbox: lê linhas pendentes no Postgres e faz POST ao router.
+  relay:
+    build: ./services/relay
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+      ROUTER_URL: http://router:8080/dispatch
+      POLL_INTERVAL: 1s
+    depends_on:
+      postgres: { condition: service_healthy }
+      router: { condition: service_started }
+
   gateway-py:
     build: ./services/gateway-py
     restart: unless-stopped
