@@ -29,15 +29,17 @@ func NewReaper(ch *amqp.Channel, queue string, store JobFailer) *Reaper {
 	return &Reaper{ch: ch, queue: queue, store: store}
 }
 
-// Run consome até o contexto ser cancelado. Se a conexão cair devolve erro: o
+// Run consome até o contexto ser cancelado; a mensagem em andamento termina com
+// contexto sem cancelamento (não abortar o UPDATE no shutdown). Se a conexão cair devolve erro: o
 // processo sai e o compose reinicia.
 func (r *Reaper) Run(ctx context.Context) error {
 	deliveries, err := r.ch.ConsumeWithContext(ctx, r.queue, "", false, false, false, false, nil)
 	if err != nil {
 		return fmt.Errorf("consume: %w", err)
 	}
+	work := context.WithoutCancel(ctx)
 	for d := range deliveries {
-		r.handle(ctx, d)
+		r.handle(work, d)
 	}
 	if ctx.Err() == nil {
 		return errors.New("amqp deliveries closed")

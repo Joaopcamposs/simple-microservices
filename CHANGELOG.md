@@ -6,6 +6,7 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-08
 
+- **graceful shutdown (Go):** router usa `http.Server.Shutdown` (8 s) em SIGTERM/SIGINT; relay, worker-go e dlq-reaper concluem o ciclo/mensagem em voo com `context.WithoutCancel`, em vez de abortar a transação ou o `Save` no meio. Verificado: `docker compose stop` sai com código 0 em menos de 1 s.
 - **healthz (router, relay):** `GET /healthz` no router (:8080, 200 enquanto o processo vive) e no relay (:8081, ping do Postgres, 503 se falhar). O compose ganha `healthcheck` nos dois e o relay passa a depender do router `service_healthy`.
 - **retry (worker-go, worker-asyncio):** erro transitório ao gravar o resultado republica a mensagem em `jobs.retry` (header `x-attempt`); a fila `jobs.retry.<worker>` espera 5 s por TTL e devolve à fila de trabalho. Máximo 3 execuções; depois, `nack` sem requeue → DLQ → `dlq-reaper` marca `FAILED`. Falha ao republicar cai no requeue antigo. Topologia nova em `definitions.json` (recriar o broker: `make down && make up`). Bridges Celery/TaskIQ inalterados.
 - **e2e:** `make e2e` (`e2e/e2e.py`, só biblioteca padrão) roda sete cenários na stack no ar: 4 workers × 2 gateways em `DONE`, idempotência na reentrega, `type` desconhecido em `FAILED`, router parado (`PENDING` → `DONE`), fila sem binding (`mandatory`) mensagem morta na DLQ marcando `FAILED` e retry após falha transitória do banco (go e asyncio). Zera jobs/outbox/resultados. `make ruff` passa a cobrir `e2e/`.

@@ -135,6 +135,7 @@ Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.a
 - **Mensagem inválida:** `reject`/`nack` sem requeue e log; o broker move a mensagem para `jobs.dlq` (motivo no header `x-death`), e o `dlq-reaper` a consome: marca o job `FAILED` (exceto se já `DONE`) e dá ack. Corpo sem `job_id` válido é logado e descartado. Não há reenvio da DLQ.
 - **Retry (workers go e asyncio):** erro transitório (ex.: banco fora) não faz requeue imediato. O worker republica a mensagem (com confirm) na exchange `jobs.retry`, com o contador no header `x-attempt`; a fila `jobs.retry.<worker>` segura por 5 s (`x-message-ttl`) e devolve à fila de trabalho via `x-dead-letter-exchange: jobs`. São no máximo 3 execuções; esgotadas, `nack` sem requeue leva à DLQ e o `dlq-reaper` marca `FAILED`. Se a republicação falha, cai no `nack` com requeue. Atraso fixo, não exponencial. Os bridges Celery/TaskIQ não usam isso: o retry deles é do framework.
 - **Healthcheck:** `GET /healthz` no router (:8080) e no relay (:8081, faz ping no Postgres); o compose os usa em `healthcheck`, e o relay só sobe com o router `healthy`.
+- **Desligamento (Go):** em SIGTERM/SIGINT o router para de aceitar conexões e termina os publishes em voo (`http.Server.Shutdown`); relay, worker-go e dlq-reaper terminam o ciclo/mensagem em andamento com contexto sem cancelamento, para não abortar no meio um POST já aceito ou um `Save`. Workers Python não têm tratamento próprio.
 - **Limites conscientes:** router e worker-go não reconectam sozinhos: ao perder o broker saem com erro e o compose os reinicia; a transação do relay fica aberta durante o POST.
 
 ---
@@ -244,6 +245,6 @@ Ideias que ampliam o propósito de estudo, ordenadas por valor. Nenhuma está im
 
 ### Mais perto de produção (se o objetivo mudar)
 
-6. **Pool de conexões nos workers** (`psycopg_pool`) e **graceful shutdown** nos workers Python. Hoje cada `save` abre uma conexão curta: suficiente para a demo, gargalo só com volume alto.
+6. **Pool de conexões nos workers** (`psycopg_pool`) e **graceful shutdown** nos workers Python (os serviços Go já têm). Hoje cada `save` abre uma conexão curta: suficiente para a demo, gargalo só com volume alto.
 7. **Idempotency key no `POST /jobs`** (o cliente que reenvia hoje cria um job novo) e **autenticação** nos gateways.
 8. **CI** rodando lint e testes.

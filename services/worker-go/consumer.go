@@ -32,6 +32,8 @@ func NewConsumer(ch *amqp.Channel, queue string, prefetch int, store ResultSaver
 }
 
 // Run consome até o contexto ser cancelado e espera as goroutines em voo.
+// As mensagens em voo terminam com um contexto sem cancelamento: abortar o Save
+// no shutdown viraria retry à toa. O limite é o prazo do orquestrador (SIGKILL).
 func (c *Consumer) Run(ctx context.Context) error {
 	if err := c.ch.Qos(c.prefetch, 0, false); err != nil {
 		return fmt.Errorf("qos: %w", err)
@@ -40,12 +42,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("consume: %w", err)
 	}
+	work := context.WithoutCancel(ctx)
 	var wg sync.WaitGroup
 	for d := range deliveries {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			c.handle(ctx, d)
+			c.handle(work, d)
 		}()
 	}
 	wg.Wait()

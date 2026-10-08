@@ -49,11 +49,13 @@ func NewRelay(pool *pgxpool.Pool, sender Sender, batch int, interval time.Durati
 
 // Run executa RunOnce a cada intervalo até o contexto ser cancelado.
 // Erro de um ciclo é logado e o loop segue: Postgres ou router podem voltar.
+// O ciclo em andamento termina mesmo após o cancelamento (WithoutCancel): abortar
+// no meio do POST faria rollback de uma entrega que o router já aceitou.
 func (r *Relay) Run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 	for {
-		if err := r.RunOnce(ctx); err != nil {
+		if err := r.RunOnce(context.WithoutCancel(ctx)); err != nil {
 			slog.Error("relay cycle", "error", err)
 		}
 		select {
