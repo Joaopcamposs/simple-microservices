@@ -7,7 +7,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -42,20 +42,23 @@ func NewDispatcher(url string) *Dispatcher {
 func (d *Dispatcher) Send(ctx context.Context, envelope []byte) Outcome {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(envelope))
 	if err != nil {
-		log.Printf("build request: %v", err)
+		slog.Error("build request", "error", err)
 		return Retry
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := d.client.Do(req)
 	if err != nil {
-		log.Printf("router unreachable: %v", err)
+		slog.Warn("router unreachable", "error", err)
 		return Retry
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("close body: %v", err)
+			slog.Error("close body", "error", err)
 		}
 	}()
+	if resp.StatusCode >= 400 {
+		slog.Warn("router replied with error", "status", resp.StatusCode)
+	}
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return Delivered

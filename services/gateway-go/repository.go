@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,7 +52,7 @@ func (r *JobRepository) Create(ctx context.Context, req CreateJobRequest, origin
 	}
 	defer func() {
 		if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			log.Printf("rollback: %v", err)
+			slog.Error("rollback", "error", err)
 		}
 	}()
 	if _, err := tx.Exec(ctx,

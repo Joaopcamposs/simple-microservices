@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,7 +34,7 @@ func (s *ResultStore) Save(ctx context.Context, jobID, worker string, result Res
 	}
 	defer func() {
 		if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			log.Printf("rollback: %v", err)
+			slog.Error("rollback", "error", err)
 		}
 	}()
 	if _, err := tx.Exec(ctx,

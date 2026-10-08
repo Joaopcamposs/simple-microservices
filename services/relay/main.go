@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,13 +37,17 @@ func run() error {
 		return err
 	}
 	dispatcher := NewDispatcher(env("ROUTER_URL", "http://localhost:8080/dispatch"))
-	log.Printf("relay polling every %s", interval)
+	slog.Info("polling outbox", "interval", interval.String())
 	NewRelay(pool, dispatcher, batchSize, interval).Run(ctx)
 	return nil
 }
 
+// main configura o log estruturado (JSON, uma linha por evento, campo "service")
+// e delega a run. Todo log do processo usa o slog padrão configurado aqui.
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "relay"))
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("fatal", "error", err)
+		os.Exit(1)
 	}
 }

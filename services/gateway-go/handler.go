@@ -2,8 +2,9 @@ package main
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -24,10 +25,19 @@ func NewJobHandler(repo *JobRepository, origin string) *JobHandler {
 // NewRouter registra as rotas do gateway (sem Swagger; ver main.go).
 func NewRouter(h *JobHandler) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(gin.Recovery(), logRequest)
 	r.POST("/jobs", h.CreateJob)
 	r.GET("/jobs/:id", h.GetJob)
 	return r
+}
+
+// logRequest é o access log: uma linha JSON por request, no mesmo formato dos
+// demais logs (substitui o gin.Logger, que escreve texto livre).
+func logRequest(c *gin.Context) {
+	start := time.Now()
+	c.Next()
+	slog.Info("request", "method", c.Request.Method, "path", c.FullPath(),
+		"status", c.Writer.Status(), "duration_ms", time.Since(start).Milliseconds())
 }
 
 // CreateJob godoc
@@ -48,10 +58,11 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 	}
 	id, err := h.repo.Create(c.Request.Context(), req, h.origin)
 	if err != nil {
-		log.Printf("create job: %v", err)
+		slog.Error("create job", "error", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Detail: "internal error"})
 		return
 	}
+	slog.Info("job accepted", "job_id", id, "type", req.Type, "origin", h.origin)
 	c.JSON(http.StatusAccepted, CreateJobResponse{JobID: id})
 }
 
@@ -87,7 +98,7 @@ func (h *JobHandler) GetJob(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		log.Printf("get job: %v", err)
+		slog.Error("get job", "error", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Detail: "internal error"})
 		return
 	}

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -54,7 +54,7 @@ func (r *Relay) Run(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		if err := r.RunOnce(ctx); err != nil {
-			log.Printf("relay cycle: %v", err)
+			slog.Error("relay cycle", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -75,7 +75,7 @@ func (r *Relay) RunOnce(ctx context.Context) error {
 	}
 	defer func() {
 		if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			log.Printf("rollback: %v", err)
+			slog.Error("rollback", "error", err)
 		}
 	}()
 	entries, err := r.claim(ctx, tx)
@@ -85,10 +85,13 @@ func (r *Relay) RunOnce(ctx context.Context) error {
 	for _, e := range entries {
 		switch r.sender.Send(ctx, e.Envelope) {
 		case Delivered:
+			slog.Info("job delivered", "job_id", e.JobID)
 			err = r.mark(ctx, tx, e, "sent", "DISPATCHED")
 		case Rejected:
+			slog.Warn("job rejected, marked failed", "job_id", e.JobID)
 			err = r.mark(ctx, tx, e, "failed", "FAILED")
 		default:
+			slog.Warn("job delivery failed, will retry", "job_id", e.JobID)
 			return tx.Commit(ctx)
 		}
 		if err != nil {

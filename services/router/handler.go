@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -52,19 +52,22 @@ func (h *DispatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var key routeKey
 	if err := json.Unmarshal(body, &key); err != nil || key.Type == "" {
+		slog.Warn("invalid envelope", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid envelope")
 		return
 	}
 	worker, ok := h.routes.Lookup(key.Type)
 	if !ok {
+		slog.Warn("unknown job type", "job_id", key.JobID, "type", key.Type)
 		writeError(w, http.StatusUnprocessableEntity, "unknown job type: "+key.Type)
 		return
 	}
 	if err := h.publisher.Publish(r.Context(), worker, body); err != nil {
-		log.Printf("publish job %s to %s: %v", key.JobID, worker, err)
+		slog.Error("publish failed", "job_id", key.JobID, "type", key.Type, "worker", worker, "error", err)
 		writeError(w, http.StatusBadGateway, "broker unavailable")
 		return
 	}
+	slog.Info("job published", "job_id", key.JobID, "type", key.Type, "worker", worker)
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -73,6 +76,6 @@ func writeError(w http.ResponseWriter, status int, detail string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(map[string]string{"detail": detail}); err != nil {
-		log.Printf("write error response: %v", err)
+		slog.Error("write error response", "error", err)
 	}
 }

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 )
@@ -23,18 +23,22 @@ func run() error {
 	}
 	defer func() {
 		if err := pub.Close(); err != nil {
-			log.Printf("close publisher: %v", err)
+			slog.Error("close publisher", "error", err)
 		}
 	}()
 	mux := http.NewServeMux()
 	mux.Handle("POST /dispatch", NewDispatchHandler(DefaultRoutes(), pub))
 	addr := env("ADDR", ":8080")
-	log.Printf("router listening on %s", addr)
+	slog.Info("listening", "addr", addr)
 	return http.ListenAndServe(addr, mux)
 }
 
+// main configura o log estruturado (JSON, uma linha por evento, campo "service")
+// e delega a run. Todo log do processo usa o slog padrão configurado aqui.
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "router"))
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("fatal", "error", err)
+		os.Exit(1)
 	}
 }

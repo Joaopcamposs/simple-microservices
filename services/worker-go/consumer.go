@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -52,13 +52,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 	var env Envelope
 	if err := json.Unmarshal(d.Body, &env); err != nil {
-		log.Printf("invalid message: %v", err)
+		slog.Warn("invalid message, rejected", "error", err)
 		c.finish(d.Nack(false, false))
 		return
 	}
 	result, err := Process(ctx, env)
 	if errors.Is(err, ErrUnsupportedType) {
-		log.Printf("job %s: %v", env.JobID, err)
+		slog.Warn("unsupported job type, rejected", "job_id", env.JobID, "type", env.Type)
 		c.finish(d.Nack(false, false))
 		return
 	}
@@ -66,16 +66,17 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 		err = c.store.Save(ctx, env.JobID, result.Worker, result)
 	}
 	if err != nil {
-		log.Printf("job %s failed: %v", env.JobID, err)
+		slog.Error("job failed, requeued", "job_id", env.JobID, "type", env.Type, "error", err)
 		c.finish(d.Nack(false, true))
 		return
 	}
+	slog.Info("job done", "job_id", env.JobID, "type", env.Type, "worker", result.Worker)
 	c.finish(d.Ack(false))
 }
 
 // finish registra falha ao confirmar/rejeitar a mensagem (ex.: canal fechado).
 func (c *Consumer) finish(err error) {
 	if err != nil {
-		log.Printf("ack/nack: %v", err)
+		slog.Error("ack/nack", "error", err)
 	}
 }

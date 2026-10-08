@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -39,19 +39,23 @@ func run() error {
 	}
 	defer func() {
 		if err := conn.Close(); err != nil {
-			log.Printf("close amqp: %v", err)
+			slog.Error("close amqp", "error", err)
 		}
 	}()
 	ch, err := conn.Channel()
 	if err != nil {
 		return err
 	}
-	log.Print("worker-go consuming jobs.go")
+	slog.Info("consuming", "queue", "jobs.go")
 	return NewConsumer(ch, "jobs.go", prefetch, NewResultStore(pool)).Run(ctx)
 }
 
+// main configura o log estruturado (JSON, uma linha por evento, campo "service")
+// e delega a run. Todo log do processo usa o slog padrão configurado aqui.
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "worker-go"))
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("fatal", "error", err)
+		os.Exit(1)
 	}
 }
