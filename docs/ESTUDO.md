@@ -2,7 +2,7 @@
 
 Guia para quem já domina HTTP, SQL, Docker e o básico de mensageria e quer entender **por que** este projeto é montado assim e **como** as peças se integram. O `README.md` diz o que existe; este arquivo explica as decisões, os mecanismos e as armadilhas.
 
-> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay` e `worker-go` existem e foram verificados. Os três workers Python estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
+> **Estado atual da implementação:** infra (Postgres, RabbitMQ), `gateway-py`, `gateway-go`, `router`, `relay` e `worker-go` e `worker-asyncio` existem e foram verificados. Os workers Celery e TaskIQ estão especificados em `docs/superpowers/plans/2026-10-07-simple-microservices.md` e entram nas próximas etapas. As seções marcam o que é **[implementado]** e o que é **[planejado]**.
 
 ---
 
@@ -278,7 +278,7 @@ Carregar `definitions.json` **substitui** o usuário padrão do broker: sem uma 
 
 ---
 
-## 9. Workers **[worker-go implementado; demais planejados]**
+## 9. Workers **[worker-go e worker-asyncio implementados; demais planejados]**
 
 Os quatro executam a mesma tarefa trivial (espera curta, grava `{"worker","detail"}`), para que a **diferença esteja no modelo de execução**, não na lógica.
 
@@ -307,6 +307,26 @@ Pontos para estudar:
 - **Três destinos de falha.** JSON inválido ou type não suportado: `Nack` sem requeue (repetir não adianta). Erro transitório (banco): `Nack` com requeue. Sucesso: `Ack`.
 - **Limite conhecido:** o requeue de erro transitório não tem backoff, então um banco fora do ar gera loop rápido de reentrega. DLQ e retry estão fora de escopo.
 - Verificado de ponta a ponta: `POST /jobs` (`image.resize`) em cada gateway chega a `DONE` com `results[0].worker == "go"` em poucos segundos.
+
+### worker-asyncio **[implementado]**
+
+Arquivos de `services/worker-asyncio/app/`:
+
+| Arquivo | Papel |
+|---|---|
+| `models.py` | `Envelope` (contrato) e `Result`, ambos `pydantic.BaseModel` |
+| `store.py` | `ResultStore.save`: insert idempotente + `jobs → DONE` numa transação |
+| `consumer.py` | `JobConsumer`: QoS, `queue.consume`, validação, processamento e ack |
+| `logs.py` | `JsonFormatter`: mesmo formato JSON dos serviços Go (`service`, `job_id`) |
+| `main.py` | configura log, conecta (`connect_robust`) e inicia o consumer |
+
+Pontos para estudar (compare com o worker-go):
+
+- **Concorrência cooperativa.** O `aio-pika` roda uma task por mensagem no mesmo event loop, uma thread só. O `asyncio.sleep` cede o controle; um `time.sleep` ou cálculo pesado travaria todas as mensagens. Em Go, a goroutine bloqueada não atrapalha as outras.
+- **Ack com `message.process(requeue=True)`.** O ack acontece quando o bloco termina sem exceção, isto é, depois de `save`. Exceção no bloco devolve a mensagem à fila.
+- **Mensagem inválida ou type alheio:** `reject(requeue=False)`, igual ao `Nack(false, false)` do Go.
+- **Reconexão:** `connect_robust` reconecta sozinho ao RabbitMQ; o worker-go e o router não têm isso.
+- **Conexão por gravação:** `ResultStore` abre uma conexão curta a cada `save`. Simples e suficiente aqui; com carga real usaria um pool, como o gateway-py.
 
 ### O padrão bridge (Celery e TaskIQ)
 
@@ -340,6 +360,27 @@ A segunda execução não duplica nem falha. O ack vem **depois** desse insert. 
 | Isolamento de falha | gateway independe de broker/router | job fica `pending` até voltarem |
 
 Cortes deliberados do projeto anterior: benchmark, OpenTelemetry/Grafana/Prometheus, fanout, DLQ, retry com backoff, schema por tipo de job, autenticação, CI/CD. Cada um é um bom exercício de extensão (veja a seção 12).
+
+---
+
+## 10.1 Logs e rastreio de um job **[serviços Go]**
+
+Cada serviço Go loga em JSON, uma linha por evento, via `log/slog`. O `main` configura o logger uma vez (`slog.SetDefault(...).With("service", "<nome>")`) e o resto do código só chama `slog.Info/Warn/Error`. Sem biblioteca extra e sem logger passado por parâmetro.
+
+O campo que une tudo é `job_id`: o mesmo id aparece em cada etapa, então `docker compose logs | grep <job_id>` conta a história do job.
+
+| Serviço | Evento (`msg`) | Nível |
+|---|---|---|
+| gateway-go | `job accepted`, `request` (método, rota, status, `duration_ms`) | INFO |
+| router | `job published` (com `worker`) / `unknown job type` | INFO / WARN |
+| relay | `job delivered` / `job rejected, marked failed` / `job delivery failed, will retry` | INFO / WARN |
+| worker-go | `job done` / `unsupported job type, rejected` / `job failed, requeued` | INFO / WARN / ERROR |
+
+Convenção de nível: INFO é o caminho normal; WARN é falha esperada que o sistema trata (type desconhecido, router fora, mensagem rejeitada); ERROR é algo inesperado (banco, ack).
+
+Exemplo de um job `bogus` que termina em `FAILED`: `job accepted` (gateway) → `unknown job type` (router) → `job rejected, marked failed` (relay). O motivo do `FAILED` agora está nos logs.
+
+Os serviços Python ainda não seguem este formato; entram na etapa Python.
 
 ---
 

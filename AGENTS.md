@@ -22,7 +22,7 @@ O `README.md` faz parte da entrega. Serviço criado/removido, endpoint novo, con
 ### Código limpo
 - Nomes em inglês; comentários e docstrings em português.
 - Todo arquivo tem docstring/comentário de módulo (o que é e por quê); toda classe, função e método tem docstring que explica propósito e limites, não repete o nome. SQL, Makefile, compose e Dockerfile têm comentários equivalentes. `ruff` (regras `D1`) barra docstring ausente em Python.
-- Sem código morto, sem `print` (use `logging`/`log`).
+- Sem código morto, sem `print`. Log estruturado: `log/slog` em JSON (Go) ou `logging` (Python), sempre com `job_id` quando houver job.
 - Mudanças mínimas e focadas; não refatore o que não foi pedido.
 
 ## Padrões do projeto

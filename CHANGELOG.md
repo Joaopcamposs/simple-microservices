@@ -6,6 +6,8 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-07
 
+- **worker-asyncio (Python):** consome `jobs.asyncio` (`http.fetch`) com aio-pika, grava resultado idempotente e marca `DONE`; ack só após gravar. Logs em JSON (`app/logs.py`) no mesmo formato dos serviços Go. Entra no compose.
+- **logs (Go):** gateway-go, router, relay e worker-go passam a logar em JSON com `log/slog`, com `service` e `job_id` em cada etapa; gateway-go em modo release com access log no mesmo formato. Falhas esperadas (type desconhecido, rejeição, retry) agora aparecem nos logs.
 - **worker-go (Go):** consome `jobs.go` com uma goroutine por mensagem (limitada pelo prefetch), grava `job_results` de forma idempotente e marca o job `DONE`; ack só após gravar. Entra no compose e no `make vet`.
 - **relay (Go):** drena a outbox (`FOR UPDATE SKIP LOCKED`), faz POST ao router e marca `sent`/`failed` pelo status; 5xx ou router fora mantém `pending`. `DISPATCHED` nunca sobrescreve `DONE`. Entra no compose e no `make vet`.
 - **router (Go):** webhook `POST /dispatch` que roteia por `type` (tabela fixa) e publica no exchange `jobs` com publisher confirms. Respostas 202/400/422/502. Entra no compose (porta interna 8080) e no `make vet`.
