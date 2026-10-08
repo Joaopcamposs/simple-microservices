@@ -258,7 +258,7 @@ Detalhes de implementação:
 
 ---
 
-## 8. RabbitMQ **[infra implementada, consumidores planejados]**
+## 8. RabbitMQ **[implementado]**
 
 ### Topologia
 
@@ -278,7 +278,7 @@ Carregar `definitions.json` **substitui** o usuário padrão do broker: sem uma 
 
 ---
 
-## 9. Workers **[worker-go e worker-asyncio implementados; demais planejados]**
+## 9. Workers **[implementados: go, asyncio, celery, taskiq]**
 
 Os quatro executam a mesma tarefa trivial (espera curta, grava `{"worker","detail"}`), para que a **diferença esteja no modelo de execução**, não na lógica.
 
@@ -400,7 +400,7 @@ Cortes deliberados do projeto anterior: benchmark, OpenTelemetry/Grafana/Prometh
 
 ---
 
-## 10.1 Logs e rastreio de um job **[serviços Go]**
+## 10.1 Logs e rastreio de um job **[serviços Go e workers Python]**
 
 > Passo a passo prático (comandos, RabbitMQ, banco, diagnóstico): `docs/OBSERVABILIDADE.md`.
 
@@ -419,7 +419,7 @@ Convenção de nível: INFO é o caminho normal; WARN é falha esperada que o si
 
 Exemplo de um job `bogus` que termina em `FAILED`: `job accepted` (gateway) → `unknown job type` (router) → `job rejected, marked failed` (relay). O motivo do `FAILED` agora está nos logs.
 
-Os serviços Python ainda não seguem este formato; entram na etapa Python.
+Os workers Python (`worker-asyncio`, `worker-celery`, `worker-taskiq` e os dois bridges) usam o mesmo formato por meio de `app/logs.py` (`JsonFormatter`). O `gateway-py` ainda usa o log padrão do uvicorn, sem `job_id` estruturado.
 
 ---
 
