@@ -2,7 +2,7 @@
 
 Demo minimalista de arquitetura desacoplada. Dois gateways (Python e Go) gravam o job numa **outbox**; um **relay** entrega a um **router** (webhook) que decide qual worker processa: Celery, TaskIQ, asyncio ou goroutine. Código enxuto, só para mostrar a arquitetura.
 
-Spec: `docs/superpowers/specs/2026-10-07-simple-microservices-design.md`. Plano: `docs/superpowers/plans/2026-10-07-simple-microservices.md`.
+Guia de estudo (mecanismos e decisões): `docs/ESTUDO.md`. Spec: `docs/superpowers/specs/2026-10-07-simple-microservices-design.md`. Plano: `docs/superpowers/plans/2026-10-07-simple-microservices.md`.
 
 ---
 
@@ -174,7 +174,7 @@ simple-microservices/
 ├── contracts/envelope.schema.json
 ├── db/init.sql
 ├── infra/rabbitmq/{definitions.json,rabbitmq.conf}
-├── docs/superpowers/{specs,plans}/
+├── docs/{ESTUDO.md,superpowers/{specs,plans}/}
 ├── docker-compose.yml
 ├── Makefile
 ├── CHANGELOG.md
