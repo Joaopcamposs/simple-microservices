@@ -41,7 +41,7 @@ Diferença estrutural mais importante: o novo introduz um **hop a mais** (relay 
 | Idempotência | `ON CONFLICT` em `(job_id, worker)` | Idem |
 | Publicação sem destino | `mandatory=true` + `NotifyReturn`: mensagem sem fila é detectada | Idem (`mandatory=true` + `NotifyReturn` no router): vira `ErrUnroutable` → 502 → outbox `pending`, tenta de novo |
 | Mensagem inválida | Rejeitada para DLQ (`jobs.dlx → jobs.dlq`) | `reject`/`nack` sem requeue, com DLQ (`jobs.dlx → jobs.dlq`); o `dlq-reaper` marca o job `FAILED` e descarta a mensagem (sem reenvio) |
-| Retry | Campo `attempt` no envelope | Não há; falha vira `FAILED` |
+| Retry | Campo `attempt` no envelope | Fila de espera com TTL (`jobs.retry.<worker>`, 5 s fixo) e header `x-attempt`, máximo 3 execuções, nos workers go e asyncio; esgotado, DLQ → `FAILED`. Sem backoff exponencial |
 | Falha do broker | Relay reconecta com backoff | Router e worker-go saem com erro; o compose reinicia. Workers Python usam `connect_robust` |
 | Falha de entrega ao router | Não se aplica | Contrato explícito: 202 → `sent`/`DISPATCHED`; 400/422 → `failed`/`FAILED`; 5xx/rede → `pending` (tenta de novo) |
 | Tipo desconhecido | Validado por schema do job no gateway | Router não acha worker → 422 → `FAILED` visível em `GET /jobs/{id}` |
@@ -132,8 +132,8 @@ Ordem sugerida, por retorno sobre custo (ver também a seção "Melhorias futura
 1. ~~**DLQ**~~ feito em 2026-10-08, com `dlq-reaper` marcando o job `FAILED` (falta reenvio).
 2. ~~**`mandatory=true` + tratamento de `Return` no router**~~ feito em 2026-10-08.
 3. **`/healthz` no relay e no router**, com `depends_on: condition: service_healthy` no compose.
-4. **Teste e2e automatizado** reproduzindo o roteiro manual atual.
-5. **Retry com contador (`attempt`)** quando houver falha transitória no worker.
+4. ~~**Teste e2e automatizado**~~ feito em 2026-10-08 (`make e2e`).
+5. ~~**Retry com contador**~~ feito em 2026-10-08 (workers go e asyncio; falta backoff exponencial e cobrir os bridges).
 
 ## 12. O que não trazer
 
@@ -146,4 +146,4 @@ Ordem sugerida, por retorno sobre custo (ver também a seção "Melhorias futura
 
 Os projetos não competem: o anterior é a **medição**, o novo é a **explicação**. O novo é mais fácil de ler, mais fácil de operar e documenta melhor as decisões; o anterior é mais forte onde o sistema encontra o mundo real (broker instável, mensagem sem destino, carga alta, necessidade de medir).
 
-A maior fraqueza do novo é a falta de retry: erro transitório faz requeue sem limite e mensagem morta não é reenviada, só marca o job `FAILED`. A maior fraqueza do anterior para estudo é o volume: o mecanismo essencial (outbox → broker → worker idempotente) fica diluído entre benchmark, observabilidade e workloads.
+A maior fraqueza do novo é a falta de `/healthz` e de métricas: o retry é de atraso fixo e só cobre go e asyncio, e a mensagem morta não é reenviada, só marca o job `FAILED`. A maior fraqueza do anterior para estudo é o volume: o mecanismo essencial (outbox → broker → worker idempotente) fica diluído entre benchmark, observabilidade e workloads.

@@ -13,7 +13,7 @@ Guia de estudo (mecanismos e decisões): `docs/ESTUDO.md`. Logs, RabbitMQ e como
 - Garantir entrega com transactional outbox (at-least-once) e workers idempotentes.
 - Manter o código pequeno e legível.
 
-**Fora de escopo:** benchmark, OpenTelemetry/Grafana/Prometheus, fanout, retry, schema por tipo de job, autenticação, CI/CD, Kubernetes.
+**Fora de escopo:** benchmark, OpenTelemetry/Grafana/Prometheus, fanout, backoff exponencial, schema por tipo de job, autenticação, CI/CD, Kubernetes.
 
 ---
 
@@ -125,14 +125,15 @@ Relay: em sucesso (2xx) marca outbox `sent` e job `DISPATCHED` (só se ainda `PE
 
 ## 6. RabbitMQ (`infra/rabbitmq/definitions.json`)
 
-Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.asyncio`, `jobs.go`, com routing key igual ao nome do worker. Cada fila tem `x-dead-letter-exchange: jobs.dlx` (fanout) ligado à fila `jobs.dlq`. Carregado no boot do broker; nenhum serviço declara topologia. O mesmo arquivo cria o usuário `guest`/`guest` (as definitions substituem o usuário padrão) e `rabbitmq.conf` libera `guest` fora do loopback; só para demo. Celery e TaskIQ criam as filas internas dos próprios frameworks (`celery` e `taskiq`).
+Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.asyncio`, `jobs.go`, com routing key igual ao nome do worker. Cada fila tem `x-dead-letter-exchange: jobs.dlx` (fanout) ligado à fila `jobs.dlq`. A exchange direct `jobs.retry` e as filas `jobs.retry.go` e `jobs.retry.asyncio` (TTL 5 s, devolvem à exchange `jobs`) implementam a espera do retry. Carregado no boot do broker; nenhum serviço declara topologia. O mesmo arquivo cria o usuário `guest`/`guest` (as definitions substituem o usuário padrão) e `rabbitmq.conf` libera `guest` fora do loopback; só para demo. Celery e TaskIQ criam as filas internas dos próprios frameworks (`celery` e `taskiq`).
 
 ## 7. Garantias e limites
 
 - **At-least-once:** o relay pode reenviar se cair entre o 2xx e o `UPDATE`.
 - **Idempotência:** resultado gravado por `(job_id, worker)` com `ON CONFLICT DO NOTHING`; o mesmo `job_id` duas vezes não duplica.
 - **Ack:** worker só confirma a mensagem depois de gravar o resultado. Nos bridges, o ack vem depois de entregar a task ao broker do framework, que reconhece tarde (`acks_late` no Celery).
-- **Mensagem inválida:** `reject`/`nack` sem requeue e log; o broker move a mensagem para `jobs.dlq` (motivo no header `x-death`), e o `dlq-reaper` a consome: marca o job `FAILED` (exceto se já `DONE`) e dá ack. Corpo sem `job_id` válido é logado e descartado. Não há retry com backoff nem reenvio.
+- **Mensagem inválida:** `reject`/`nack` sem requeue e log; o broker move a mensagem para `jobs.dlq` (motivo no header `x-death`), e o `dlq-reaper` a consome: marca o job `FAILED` (exceto se já `DONE`) e dá ack. Corpo sem `job_id` válido é logado e descartado. Não há reenvio da DLQ.
+- **Retry (workers go e asyncio):** erro transitório (ex.: banco fora) não faz requeue imediato. O worker republica a mensagem (com confirm) na exchange `jobs.retry`, com o contador no header `x-attempt`; a fila `jobs.retry.<worker>` segura por 5 s (`x-message-ttl`) e devolve à fila de trabalho via `x-dead-letter-exchange: jobs`. São no máximo 3 execuções; esgotadas, `nack` sem requeue leva à DLQ e o `dlq-reaper` marca `FAILED`. Se a republicação falha, cai no `nack` com requeue. Atraso fixo, não exponencial. Os bridges Celery/TaskIQ não usam isso: o retry deles é do framework.
 - **Limites conscientes:** router e worker-go não reconectam sozinhos: ao perder o broker saem com erro e o compose os reinicia; a transação do relay fica aberta durante o POST.
 
 ---
@@ -207,7 +208,7 @@ Cada fase muda **uma linguagem** (ou só infra/docs) e termina com verificação
 | 8 | `worker-asyncio` | Python | job `http.fetch` chega a `DONE` |
 | 9 | `worker-celery` | Python | job `report.generate` chega a `DONE` |
 | 10 | `worker-taskiq` | Python | job `email.send` chega a `DONE` |
-| 11 | Verificação ponta a ponta | Python (`e2e/e2e.py`) | `make e2e`: 8 jobs (2 gateways × 4 types) em `DONE`; `type` desconhecido em `FAILED`; router parado não derruba o `POST`; fila sem binding e DLQ |
+| 11 | Verificação ponta a ponta | Python (`e2e/e2e.py`) | `make e2e`: 8 jobs (2 gateways × 4 types) em `DONE`; `type` desconhecido em `FAILED`; router parado não derruba o `POST`; fila sem binding, DLQ e retry após falha transitória (go e asyncio) |
 | 12 | Revisão final deste README contra o código | docs | portas, serviços e comandos conferem |
 
 ---
@@ -231,7 +232,7 @@ Ideias que ampliam o propósito de estudo, ordenadas por valor. Nenhuma está im
 
 ### Alto valor, custo baixo
 
-1. **Retry com backoff:** erro transitório faz requeue imediato, sem limite de tentativas. Um contador de tentativas e o reenvio de mensagens da `jobs.dlq` completam o ciclo de falha (hoje o `dlq-reaper` só marca `FAILED`).
+1. **Backoff exponencial e reenvio da DLQ:** o retry atual (go e asyncio) usa atraso fixo de 5 s e máximo de 3 tentativas, e não cobre os bridges Celery/TaskIQ. Atraso crescente (uma fila de espera por degrau) e o reenvio de mensagens da `jobs.dlq` completam o ciclo de falha (hoje o `dlq-reaper` só marca `FAILED`).
 2. **Comparar os workers com trabalho real:** os quatro executam a mesma tarefa trivial. Trocar o `sleep` por I/O bloqueante e CPU, e medir o tempo até `DONE` de N jobs por worker, mostra na prática quando usar Celery, TaskIQ, asyncio ou Go.
 
 ### Valor médio

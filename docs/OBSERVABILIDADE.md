@@ -63,6 +63,7 @@ Management em `http://localhost:55673` (guest/guest).
 - **Queues → `celery`:** fila interna do framework. *Ready* > 0 com job `DISPATCHED` indica worker Celery parado.
 - **Exchanges → `jobs`:** bindings das quatro filas (routing key = nome do worker).
 - **Queues → `jobs.dlq`:** mensagens rejeitadas pelos workers (JSON inválido, `type` não suportado). O `dlq-reaper` as consome na hora, então o contador normalmente é 0; se subir, o `dlq-reaper` está parado. Para ver o corpo e o header `x-death`, pare o `dlq-reaper` e use *Get messages*. O job correspondente vira `FAILED` (log `dead message, job marked failed` com `job_id` e `source_queue`).
+- **Queues → `jobs.retry.go`, `jobs.retry.asyncio`:** mensagens esperando 5 s para a nova tentativa. Normalmente 0; ficam > 0 só enquanto há erro transitório (ex.: banco fora). Logs: `job failed, retry scheduled` (go) / `job failed, retry N scheduled` (asyncio) e, ao esgotar 3 execuções, `job failed, retries exhausted`, seguido de `dead message, job marked failed` no `dlq-reaper`.
 - **Get messages:** espia o conteúdo sem consumir, com *Ack mode* "Nack message requeue true".
 
 Pelo terminal:

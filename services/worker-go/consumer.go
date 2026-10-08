@@ -11,18 +11,24 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+// ResultSaver grava o resultado do job. Interface para testar sem banco.
+type ResultSaver interface {
+	Save(ctx context.Context, jobID, worker string, result Result) error
+}
+
 // Consumer lê a fila e processa cada mensagem numa goroutine.
 type Consumer struct {
 	ch       *amqp.Channel
 	queue    string
 	prefetch int
-	store    *ResultStore
+	store    ResultSaver
+	retrier  Retrier
 }
 
 // NewConsumer cria o consumer. prefetch limita as mensagens em voo e, portanto,
 // o número de goroutines simultâneas: o broker não entrega mais que isso sem ack.
-func NewConsumer(ch *amqp.Channel, queue string, prefetch int, store *ResultStore) *Consumer {
-	return &Consumer{ch: ch, queue: queue, prefetch: prefetch, store: store}
+func NewConsumer(ch *amqp.Channel, queue string, prefetch int, store ResultSaver, retrier Retrier) *Consumer {
+	return &Consumer{ch: ch, queue: queue, prefetch: prefetch, store: store, retrier: retrier}
 }
 
 // Run consome até o contexto ser cancelado e espera as goroutines em voo.
@@ -53,7 +59,8 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 // handle processa uma mensagem. O ack só acontece depois de gravar o resultado.
 // JSON inválido ou type não suportado: nack sem requeue (repetir não adianta).
-// Erro transitório (banco): nack com requeue, a mensagem volta para a fila.
+// Erro transitório (banco): reagenda na fila de espera (retry com atraso) e dá
+// ack na original; esgotadas as tentativas, nack sem requeue leva à DLQ.
 func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 	var env Envelope
 	if err := json.Unmarshal(d.Body, &env); err != nil {
@@ -71,11 +78,29 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 		err = c.store.Save(ctx, env.JobID, result.Worker, result)
 	}
 	if err != nil {
-		slog.Error("job failed, requeued", "job_id", env.JobID, "type", env.Type, "error", err)
-		c.finish(d.Nack(false, true))
+		c.retryOrGiveUp(ctx, d, env, err)
 		return
 	}
 	slog.Info("job done", "job_id", env.JobID, "type", env.Type, "worker", result.Worker)
+	c.finish(d.Ack(false))
+}
+
+// retryOrGiveUp trata a falha transitória: reagenda com attempt+1 e confirma a
+// original, ou manda à DLQ se as tentativas acabaram. Se nem o reagendamento
+// funciona (broker), devolve a mensagem à fila: melhor repetir que perder.
+func (c *Consumer) retryOrGiveUp(ctx context.Context, d amqp.Delivery, env Envelope, cause error) {
+	next := attemptOf(d) + 1
+	if next >= maxAttempts {
+		slog.Error("job failed, retries exhausted", "job_id", env.JobID, "type", env.Type, "attempts", next, "error", cause)
+		c.finish(d.Nack(false, false))
+		return
+	}
+	if err := c.retrier.Retry(ctx, d.Body, next); err != nil {
+		slog.Error("job failed, retry not scheduled, requeued", "job_id", env.JobID, "type", env.Type, "error", err)
+		c.finish(d.Nack(false, true))
+		return
+	}
+	slog.Warn("job failed, retry scheduled", "job_id", env.JobID, "type", env.Type, "attempt", next, "error", cause)
 	c.finish(d.Ack(false))
 }
 

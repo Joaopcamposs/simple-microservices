@@ -22,6 +22,15 @@
       "auto_delete": false,
       "internal": false,
       "arguments": {}
+    },
+    {
+      "name": "jobs.retry",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
     }
   ],
   "queues": [
@@ -67,6 +76,26 @@
       "durable": true,
       "auto_delete": false,
       "arguments": {}
+    },
+    {
+      "name": "jobs.retry.go",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 5000,
+        "x-dead-letter-exchange": "jobs"
+      }
+    },
+    {
+      "name": "jobs.retry.asyncio",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 5000,
+        "x-dead-letter-exchange": "jobs"
+      }
     }
   ],
   "bindings": [
@@ -108,6 +137,22 @@
       "destination": "jobs.dlq",
       "destination_type": "queue",
       "routing_key": "",
+      "arguments": {}
+    },
+    {
+      "source": "jobs.retry",
+      "vhost": "/",
+      "destination": "jobs.retry.go",
+      "destination_type": "queue",
+      "routing_key": "go",
+      "arguments": {}
+    },
+    {
+      "source": "jobs.retry",
+      "vhost": "/",
+      "destination": "jobs.retry.asyncio",
+      "destination_type": "queue",
+      "routing_key": "asyncio",
       "arguments": {}
     }
   ],

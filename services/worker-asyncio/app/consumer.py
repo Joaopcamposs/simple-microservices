@@ -6,11 +6,13 @@ mesmo event loop (uma thread). O prefetch limita quantas ficam em voo.
 
 import asyncio
 import logging
+from uuid import UUID
 
 from aio_pika.abc import AbstractChannel, AbstractIncomingMessage
 from pydantic import ValidationError
 
 from app.models import Envelope, Result
+from app.retry import ATTEMPT_HEADER, MAX_ATTEMPTS, Retrier
 from app.store import ResultStore
 
 logger = logging.getLogger(__name__)
@@ -23,10 +25,11 @@ PREFETCH = 10  # limita mensagens em voo e, logo, a concorrência
 class JobConsumer:
     """Consome a fila e grava o resultado antes de confirmar a mensagem."""
 
-    def __init__(self, channel: AbstractChannel, store: ResultStore) -> None:
-        """Recebe o canal AMQP e o store de resultados."""
+    def __init__(self, channel: AbstractChannel, store: ResultStore, retrier: Retrier) -> None:
+        """Recebe o canal AMQP, o store de resultados e o agendador de retry."""
         self._channel = channel
         self._store = store
+        self._retrier = retrier
 
     async def run(self) -> None:
         """Define o QoS e consome indefinidamente (callbacks rodam concorrentes)."""
@@ -52,9 +55,9 @@ class JobConsumer:
         """Valida, processa e grava.
 
         Inválida ou type não suportado: reject sem requeue (repetir não adianta).
-        Erro transitório (ex.: banco): `message.process(requeue=True)` devolve a
-        mensagem à fila; o ack só acontece se o bloco terminar sem erro, isto é,
-        depois de gravar o resultado.
+        Erro transitório (ex.: banco): reagenda na fila de espera e confirma a
+        original; esgotadas as tentativas, nack sem requeue leva à DLQ. O ack só
+        acontece depois de gravar o resultado (ou de reagendar).
         """
         try:
             envelope = self._parse(message.body)
@@ -63,7 +66,29 @@ class JobConsumer:
             await message.reject(requeue=False)
             return
         extra = {"job_id": envelope.job_id}
-        async with message.process(requeue=True):
+        try:
             result = await self._process(envelope)
             await self._store.save(envelope.job_id, result.worker, result)
-            logger.info("job done", extra=extra)
+        except Exception as exc:
+            await self._retry_or_give_up(message, exc, extra)
+            return
+        await message.ack()
+        logger.info("job done", extra=extra)
+
+    async def _retry_or_give_up(
+        self, message: AbstractIncomingMessage, cause: Exception, extra: dict[str, UUID]
+    ) -> None:
+        """Reagenda com attempt+1 ou manda à DLQ; sem broker para reagendar, devolve à fila."""
+        next_attempt = int(str(message.headers.get(ATTEMPT_HEADER, 0))) + 1
+        if next_attempt >= MAX_ATTEMPTS:
+            logger.error("job failed, retries exhausted: %s", cause, extra=extra)
+            await message.nack(requeue=False)
+            return
+        try:
+            await self._retrier.schedule(message.body, next_attempt)
+        except Exception:
+            logger.exception("job failed, retry not scheduled, requeued", extra=extra)
+            await message.nack(requeue=True)
+            return
+        logger.warning("job failed, retry %d scheduled: %s", next_attempt, cause, extra=extra)
+        await message.ack()

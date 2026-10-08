@@ -46,8 +46,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	retryCh, err := conn.Channel()
+	if err != nil {
+		return err
+	}
+	retrier, err := NewAMQPRetrier(retryCh)
+	if err != nil {
+		return err
+	}
 	slog.Info("consuming", "queue", "jobs.go")
-	return NewConsumer(ch, "jobs.go", prefetch, NewResultStore(pool)).Run(ctx)
+	return NewConsumer(ch, "jobs.go", prefetch, NewResultStore(pool), retrier).Run(ctx)
 }
 
 // main configura o log estruturado (JSON, uma linha por evento, campo "service")

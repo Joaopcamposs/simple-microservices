@@ -8,6 +8,7 @@ import aio_pika
 
 from app.consumer import JobConsumer
 from app.logs import JsonFormatter
+from app.retry import RETRY_EXCHANGE, AmqpRetrier
 from app.store import ResultStore
 
 
@@ -24,7 +25,8 @@ async def main() -> None:
         store = ResultStore(
             os.environ.get("DATABASE_URL", "postgres://app:app@localhost:55432/app")
         )
-        await JobConsumer(channel, store).run()
+        exchange = await channel.get_exchange(RETRY_EXCHANGE)
+        await JobConsumer(channel, store, AmqpRetrier(exchange)).run()
 
 
 if __name__ == "__main__":

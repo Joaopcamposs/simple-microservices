@@ -304,8 +304,8 @@ Pontos para estudar:
 
 - **Prefetch é o limitador de concorrência.** `Qos(10)` faz o broker entregar no máximo 10 mensagens sem ack; como cada uma ganha uma goroutine, são no máximo 10 em paralelo. Não há worker pool explícito.
 - **Ack só depois de gravar.** `Ack` vem depois do `Save`. Se o processo morre no meio, a mensagem volta para a fila e `ON CONFLICT` absorve a repetição.
-- **Três destinos de falha.** JSON inválido ou type não suportado: `Nack` sem requeue (repetir não adianta). Erro transitório (banco): `Nack` com requeue. Sucesso: `Ack`.
-- **Limite conhecido:** o requeue de erro transitório não tem backoff, então um banco fora do ar gera loop rápido de reentrega. Retry com backoff está fora de escopo.
+- **Três destinos de falha.** JSON inválido ou type não suportado: `Nack` sem requeue (repetir não adianta). Erro transitório (banco): republica em `jobs.retry` (espera 5 s por TTL, até 3 execuções) e dá `Ack`; esgotadas as tentativas, `Nack` sem requeue (DLQ). Se a republicação falha, `Nack` com requeue. Sucesso: `Ack`.
+- **Retry por fila de espera.** `retry.go` publica (com confirm) na exchange direct `jobs.retry`, routing key = worker, header `x-attempt`. A fila `jobs.retry.go` tem `x-message-ttl: 5000` e `x-dead-letter-exchange: jobs`: ao expirar, a mensagem volta à `jobs.go` sem o worker manter timer. Evita o loop rápido de requeue com banco fora do ar. Limite: atraso fixo, não exponencial.
 - Verificado de ponta a ponta: `POST /jobs` (`image.resize`) em cada gateway chega a `DONE` com `results[0].worker == "go"` em poucos segundos.
 
 ### worker-asyncio **[implementado]**
@@ -323,7 +323,7 @@ Arquivos de `services/worker-asyncio/app/`:
 Pontos para estudar (compare com o worker-go):
 
 - **Concorrência cooperativa.** O `aio-pika` roda uma task por mensagem no mesmo event loop, uma thread só. O `asyncio.sleep` cede o controle; um `time.sleep` ou cálculo pesado travaria todas as mensagens. Em Go, a goroutine bloqueada não atrapalha as outras.
-- **Ack com `message.process(requeue=True)`.** O ack acontece quando o bloco termina sem exceção, isto é, depois de `save`. Exceção no bloco devolve a mensagem à fila.
+- **Ack com `message.process(requeue=True)`.** O ack acontece quando o bloco termina sem exceção, isto é, depois de `save`. Exceção no bloco devolve a mensagem à fila. Erro transitório no `save` é tratado antes: `retry.py` republica em `jobs.retry` (mesmo esquema do Go) e o ack sai normalmente.
 - **Mensagem inválida ou type alheio:** `reject(requeue=False)`, igual ao `Nack(false, false)` do Go.
 - **Reconexão:** `connect_robust` reconecta sozinho ao RabbitMQ; o worker-go e o router não têm isso.
 - **Conexão por gravação:** `ResultStore` abre uma conexão curta a cada `save`. Simples e suficiente aqui; com carga real usaria um pool, como o gateway-py.
@@ -396,7 +396,7 @@ A segunda execução não duplica nem falha. O ack vem **depois** desse insert. 
 | Efeito único | `ON CONFLICT DO NOTHING` | só protege o resultado gravado, não efeitos externos |
 | Isolamento de falha | gateway independe de broker/router | job fica `pending` até voltarem |
 
-Cortes deliberados do projeto anterior: benchmark, OpenTelemetry/Grafana/Prometheus, fanout, retry com backoff, schema por tipo de job, autenticação, CI/CD. Cada um é um bom exercício de extensão (veja a seção 12).
+Cortes deliberados do projeto anterior: benchmark, OpenTelemetry/Grafana/Prometheus, fanout, backoff exponencial, schema por tipo de job, autenticação, CI/CD. Cada um é um bom exercício de extensão (veja a seção 12).
 
 ---
 
@@ -413,7 +413,8 @@ O campo que une tudo é `job_id`: o mesmo id aparece em cada etapa, então `dock
 | gateway-go | `job accepted`, `request` (método, rota, status, `duration_ms`) | INFO |
 | router | `job published` (com `worker`) / `unknown job type` | INFO / WARN |
 | relay | `job delivered` / `job rejected, marked failed` / `job delivery failed, will retry` | INFO / WARN |
-| worker-go | `job done` / `unsupported job type, rejected` / `job failed, requeued` | INFO / WARN / ERROR |
+| worker-go | `job done` / `unsupported job type, rejected` / `job failed, retry scheduled` / `job failed, retries exhausted` / `job failed, retry not scheduled, requeued` | INFO / WARN / ERROR |
+| worker-asyncio | `job failed, retry N scheduled` / `job failed, retries exhausted` / `job failed, retry not scheduled, requeued` | WARN / ERROR |
 | dlq-reaper | `dead message, job marked failed` / `dead message without usable job_id, dropped` / `mark failed, requeued` | INFO / WARN / ERROR |
 
 Convenção de nível: INFO é o caminho normal; WARN é falha esperada que o sistema trata (type desconhecido, router fora, mensagem rejeitada); ERROR é algo inesperado (banco, ack).
@@ -447,7 +448,7 @@ As regras do `AGENTS.md` não são estilo, são o que mantém as fronteiras:
 
 ### Extensões para praticar
 
-- Retry com backoff e reenvio de mensagens da `jobs.dlq` (hoje o `dlq-reaper` só marca o job `FAILED`).
+- Backoff exponencial, retry nos bridges Celery/TaskIQ e reenvio de mensagens da `jobs.dlq` (hoje o `dlq-reaper` só marca o job `FAILED`).
 - Lease/`in_flight` na outbox para não segurar transação durante o POST do relay.
 - Reconexão automática do router e dos workers.
 - `traceparent` no envelope e OpenTelemetry ponta a ponta.

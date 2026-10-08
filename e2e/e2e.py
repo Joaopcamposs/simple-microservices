@@ -180,6 +180,31 @@ class Scenarios:
         queues = self.stack.management("GET", "/queues/%2F/jobs.dlq")
         assert isinstance(queues, dict) and queues["messages"] == 0, "DLQ não esvaziou"
 
+    def transient_failure_recovers_by_retry(self) -> None:
+        """Save falha (tabela ausente); com a tabela de volta, o retry conclui o job."""
+        for worker, job_type in (("go", "image.resize"), ("asyncio", "http.fetch")):
+            job_id = f"01a11992-cccc-7b71-b568-{'0' if worker == 'go' else '1'}5fa74aae1d4"
+            self.stack.psql(
+                f"INSERT INTO jobs (id, type, payload, status, origin) "
+                f"VALUES ('{job_id}', '{job_type}', '{{}}', 'DISPATCHED', 'e2e')"
+            )
+            envelope = {
+                "job_id": job_id,
+                "type": job_type,
+                "payload": {},
+                "created_at": "2026-10-08T00:00:00Z",
+                "origin": "e2e",
+            }
+            self.stack.psql("ALTER TABLE job_results RENAME TO job_results_off")
+            try:
+                self.stack.publish(worker, json.dumps(envelope))
+                time.sleep(2)
+                status = self.stack.psql(f"SELECT status FROM jobs WHERE id = '{job_id}'")
+                assert status.strip() == "DISPATCHED", status
+            finally:
+                self.stack.psql("ALTER TABLE job_results_off RENAME TO job_results")
+            self.stack.wait_status(job_id, "DONE")
+
 
 def run(scenarios: list[Callable[[], None]], stack: Stack) -> int:
     """Roda cada cenário com estado limpo e devolve o número de falhas."""
@@ -210,6 +235,7 @@ def main() -> int:
             s.router_down_recovers,
             s.unroutable_waits_for_binding,
             s.dead_message_fails_job,
+            s.transient_failure_recovers_by_retry,
         ],
         stack,
     )
