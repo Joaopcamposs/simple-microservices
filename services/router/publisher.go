@@ -20,14 +20,16 @@ const exchangeName = "jobs"
 // O canal AMQP não é seguro para uso concorrente e cada request HTTP roda em
 // sua própria goroutine, então um mutex serializa os publishes.
 type AMQPPublisher struct {
-	mu   sync.Mutex
-	conn *amqp.Connection
-	ch   *amqp.Channel
+	mu     sync.Mutex
+	conn   *amqp.Connection
+	ch     *amqp.Channel
+	closed chan *amqp.Error
 }
 
 // NewAMQPPublisher conecta ao broker e liga o modo de confirmação.
-// Não reconecta sozinho: se a conexão cair, o processo falha e o compose
-// reinicia (restart: unless-stopped). Simples, e suficiente para a demo.
+// Não reconecta sozinho: se a conexão cair, Closed() avisa, o main encerra o
+// processo com erro e o compose o reinicia (restart: unless-stopped). Simples,
+// e suficiente para a demo.
 func NewAMQPPublisher(url string) (*AMQPPublisher, error) {
 	conn, err := amqp.Dial(url)
 	if err != nil {
@@ -40,7 +42,8 @@ func NewAMQPPublisher(url string) (*AMQPPublisher, error) {
 	if err := ch.Confirm(false); err != nil {
 		return nil, fmt.Errorf("enable confirms: %w", err)
 	}
-	return &AMQPPublisher{conn: conn, ch: ch}, nil
+	closed := conn.NotifyClose(make(chan *amqp.Error, 1))
+	return &AMQPPublisher{conn: conn, ch: ch, closed: closed}, nil
 }
 
 // Publish envia o corpo ao exchange com routing key = worker e espera o confirm.
@@ -65,6 +68,12 @@ func (p *AMQPPublisher) Publish(ctx context.Context, worker Worker, body []byte)
 		return errors.New("broker nack")
 	}
 	return nil
+}
+
+// Closed devolve um canal que recebe o erro quando o broker derruba a conexão
+// (restart do RabbitMQ, queda de rede). Não dispara em Close() normal.
+func (p *AMQPPublisher) Closed() <-chan *amqp.Error {
+	return p.closed
 }
 
 // Close encerra a conexão (o canal fecha junto).

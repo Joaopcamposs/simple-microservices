@@ -6,6 +6,7 @@ Mudanças notáveis do projeto, mais recentes primeiro.
 
 ### 2026-10-07
 
+- **router, worker-go (fix):** se o RabbitMQ derruba a conexão, o processo sai com erro e o compose o reinicia. Antes o router continuava vivo respondendo 502 indefinidamente.
 - **worker-asyncio (Python):** consome `jobs.asyncio` (`http.fetch`) com aio-pika, grava resultado idempotente e marca `DONE`; ack só após gravar. Logs em JSON (`app/logs.py`) no mesmo formato dos serviços Go. Entra no compose.
 - **logs (Go):** gateway-go, router, relay e worker-go passam a logar em JSON com `log/slog`, com `service` e `job_id` em cada etapa; gateway-go em modo release com access log no mesmo formato. Falhas esperadas (type desconhecido, rejeição, retry) agora aparecem nos logs.
 - **worker-go (Go):** consome `jobs.go` com uma goroutine por mensagem (limitada pelo prefetch), grava `job_results` de forma idempotente e marca o job `DONE`; ack só após gravar. Entra no compose e no `make vet`.

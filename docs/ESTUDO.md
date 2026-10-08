@@ -254,7 +254,7 @@ Detalhes de implementação:
 - **`DeliveryMode: Persistent`** + fila durável: a mensagem sobrevive a restart do broker.
 - **Mutex no publish:** o `amqp.Channel` não é seguro para uso concorrente, e o handler HTTP roda uma goroutine por request.
 - **Interface `Publisher`** injetada no handler: o teste usa um fake e valida roteamento e status sem broker.
-- **Não reconecta sozinho:** se a conexão AMQP cair, o processo falha e o compose reinicia (`restart: unless-stopped`). Decisão de simplicidade, listada como limite no README.
+- **Não reconecta sozinho, mas morre rápido.** `conn.NotifyClose` avisa quando o broker derruba a conexão; o `main` retorna erro, o processo sai e o compose o reinicia (`restart: unless-stopped`), já reconectado. Sem isso o router ficaria vivo respondendo 502 para sempre (bug real encontrado ao recriar o RabbitMQ). O worker-go faz o mesmo: o fim do canal de entregas vira erro. O worker-asyncio usa `connect_robust`, que reconecta sem reiniciar.
 
 ---
 

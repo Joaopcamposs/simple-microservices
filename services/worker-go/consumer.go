@@ -43,6 +43,11 @@ func (c *Consumer) Run(ctx context.Context) error {
 		}()
 	}
 	wg.Wait()
+	// O canal de entregas fecha em shutdown (ctx cancelado) ou quando a conexão
+	// cai. No segundo caso devolvemos erro: o processo sai e o compose reinicia.
+	if ctx.Err() == nil {
+		return errors.New("amqp deliveries closed")
+	}
 	return nil
 }
 

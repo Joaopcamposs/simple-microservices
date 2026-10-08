@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -30,7 +31,16 @@ func run() error {
 	mux.Handle("POST /dispatch", NewDispatchHandler(DefaultRoutes(), pub))
 	addr := env("ADDR", ":8080")
 	slog.Info("listening", "addr", addr)
-	return http.ListenAndServe(addr, mux)
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- http.ListenAndServe(addr, mux) }()
+	// Sem conexão com o broker o router não serve para nada (todo publish
+	// daria 502): sair com erro faz o compose reiniciá-lo já reconectado.
+	select {
+	case err := <-serverErr:
+		return err
+	case amqpErr := <-pub.Closed():
+		return fmt.Errorf("amqp connection lost: %w", amqpErr)
+	}
 }
 
 // main configura o log estruturado (JSON, uma linha por evento, campo "service")

@@ -132,7 +132,7 @@ Exchange `jobs` (direct) e filas duráveis `jobs.celery`, `jobs.taskiq`, `jobs.a
 - **Idempotência:** resultado gravado por `(job_id, worker)` com `ON CONFLICT DO NOTHING`; o mesmo `job_id` duas vezes não duplica.
 - **Ack:** worker só confirma a mensagem depois de gravar o resultado. Nos bridges, o ack vem depois de entregar a task ao broker do framework, que reconhece tarde (`acks_late` no Celery).
 - **Mensagem inválida:** `reject`/`nack` sem requeue e log. Não há DLQ nem retry com backoff.
-- **Limites conscientes:** router e workers não reconectam sozinhos ao broker (o compose reinicia o processo); a transação do relay fica aberta durante o POST.
+- **Limites conscientes:** router e worker-go não reconectam sozinhos: ao perder o broker saem com erro e o compose os reinicia; a transação do relay fica aberta durante o POST.
 
 ---
 
